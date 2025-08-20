@@ -6,6 +6,7 @@ mod core {
     mod log;
     mod agent;
     mod identity;
+    mod utils;
 }
 
 mod traits {

@@ -36,3 +36,4 @@ crypto = { version = "0.5.1", features = ["signature", "digest"] }
 sha2 = "0.10.9"
 rsa = "0.9.8"
 base64 = "0.22.1"
+hex = "0.4.3"
