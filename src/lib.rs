@@ -7,6 +7,8 @@ mod core {
     mod agent;
     mod identity;
     mod utils;
+    mod ai;
+    mod mesh;
 }
 
 mod traits {

@@ -1,7 +1,7 @@
 use std::{collections::HashMap, fs, process::Command, time::Duration};
 use tokio::time::sleep;
 
-use crate::core::{bettercap::Bettercap, config::Config, log::LOGGER, utils::iface_channels};
+use crate::core::{ai::Epoch, bettercap::Bettercap, config::Config, log::LOGGER, utils::iface_channels};
 
 const WIFI_RECON: &str = "wifi.recon";
 
@@ -209,6 +209,29 @@ impl Agent {
         self.last_pwned = None;
         self.history.clear();
         self.handshakes.clear();
+    }
+
+    pub async fn recon(mut self) {
+        let mut recon_time = self.config.personality.recon_time;
+        let max_inactive = self.config.personality.max_inactive_scale;
+        let recon_multiplier = self.config.personality.recon_inactive_multiplier;
+        let channels = &self.config.personality.channels;
+
+        if self.epoch.inactive_for >= Duration::from_secs(max_inactive) {
+            recon_time *= recon_multiplier;
+        }
+
+        if channels.is_empty() {
+            self.current_channel = None;
+            LOGGER.log_debug("RECON", "No channels available for recon.");
+            self.bettercap.run(&["wifi.recon.channel", "clear"]).await.ok();
+        } else {
+            let channel_str = channels.iter().map(|c| c.to_string()).collect::<Vec<_>>().join(",");
+            self.bettercap.run(&["wifi.recon.channel", "set", &channel_str]).await.ok();
+        }
+
+        LOGGER.log_debug("RECON", &format!("Recon time set to {} seconds", recon_time));
+        // WAIT HERE
     }
 
     pub fn supported_channels(&self) -> Vec<u8> {
