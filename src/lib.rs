@@ -9,6 +9,7 @@ mod core {
     mod utils;
     mod ai;
     mod mesh;
+    mod automata;
 }
 
 mod traits {

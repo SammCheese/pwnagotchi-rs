@@ -8,8 +8,8 @@ impl RewardFunction {
   const RANGE: (f64, f64) = (-0.7, 1.02);
   const NOZERO: f64 = 1e-20;
 
-  pub fn call(&self, epoch: f64, state: &HashMap<&str, f64>) -> f64 {
-        let tot_epochs = epoch + Self::NOZERO;
+  pub fn call(&self, epoch: u64, state: &HashMap<&str, f64>) -> f64 {
+        let tot_epochs = epoch as f64 + Self::NOZERO;
         let tot_interactions =
             (state.get("num_deauths").unwrap_or(&0.0)
             + state.get("num_associations").unwrap_or(&0.0))

@@ -1,20 +1,22 @@
 use std::{collections::HashMap, fs, process::Command, time::Duration};
 use tokio::time::sleep;
 
-use crate::core::{ai::Epoch, bettercap::Bettercap, config::Config, log::LOGGER, utils::iface_channels};
+use crate::core::{automata::Automata, bettercap::Bettercap, config::Config, log::LOGGER, utils::iface_channels};
 
 const WIFI_RECON: &str = "wifi.recon";
 
 pub struct Agent {
   config: Config,
   bettercap: Bettercap,
+  automata: Automata,
   pub started_at: std::time::SystemTime,
   pub current_channel: Option<u8>,
   pub total_aps: u32,
   pub aps_on_channel: u32,
   pub supported_channels: Vec<u8>,
-  
-  pub access_points: HashMap<String, AccessPoint>,
+  pub peers: Vec<Peer>,
+
+  pub access_points: Vec<AccessPoint>,
   pub last_pwned: Option<String>,
   pub history: Vec<String>,
   pub handshakes: HashMap<String, Handshake>,
@@ -28,6 +30,14 @@ pub struct AccessPoint {
   pub channel: u8,
   pub signal: i32,
   pub pwned: bool,
+  pub stations: Vec<String>,
+  pub clients: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct Peer {
+  pub mac: String,
+  pub last_channel: u8,
 }
 
 #[derive(Debug, Clone)]
@@ -43,12 +53,14 @@ impl Default for Agent {
         Agent {
             bettercap: Bettercap::default(),
             config: Config::default(),
+            automata: Automata::default(),
             started_at: std::time::SystemTime::now(),
             current_channel: None,
             total_aps: 0,
             aps_on_channel: 0,
             supported_channels: vec![1, 6, 11],
-            access_points: HashMap::new(),
+            access_points: Vec::new(),
+            peers: Vec::new(),
             last_pwned: None,
             history: Vec::new(),
             handshakes: HashMap::new(),
@@ -63,13 +75,15 @@ impl Agent {
         let bettercap = Bettercap::new(&config);
         let mut agent = Self  {
             bettercap,
-            config,
+            config: config.clone(),
+            automata: Automata::new(config),
             started_at: std::time::SystemTime::now(),
             current_channel: None,
             total_aps: 0,
             aps_on_channel: 0,
             supported_channels: vec![1, 6, 11],
-            access_points: HashMap::new(),
+            access_points: Vec::new(),
+            peers: Vec::new(),
             last_pwned: None,
             history: Vec::new(),
             handshakes: HashMap::new(),
@@ -166,7 +180,7 @@ impl Agent {
 
         let wifi_running = self.is_module_running("wifi").await;
 
-        if (wifi_running && restart) {
+        if wifi_running && restart {
             LOGGER.log_debug("Agent", "Restarting WiFi module...");
             self.restart_module(WIFI_RECON).await;
             self.bettercap.run(&["wifi.clear"]).await.ok();
@@ -182,7 +196,7 @@ impl Agent {
     async fn wait_for_bettercap(&mut self) {
         loop {
             match self.bettercap.session(None).await {
-                Ok(session) => {
+                Ok(_session) => {
                     return;
                 }
                 Err(_) => {
@@ -217,7 +231,7 @@ impl Agent {
         let recon_multiplier = self.config.personality.recon_inactive_multiplier;
         let channels = &self.config.personality.channels;
 
-        if self.epoch.inactive_for >= Duration::from_secs(max_inactive) {
+        if self.automata.epoch.inactive_for >= max_inactive {
             recon_time *= recon_multiplier;
         }
 
@@ -232,6 +246,41 @@ impl Agent {
 
         LOGGER.log_debug("RECON", &format!("Recon time set to {} seconds", recon_time));
         // WAIT HERE
+
+        self.automata.wait_for(recon_time, Some(false));
+    }
+
+    pub fn set_access_points(&mut self, aps: Vec<AccessPoint>) -> Vec<AccessPoint> {
+        self.access_points = aps;
+        self.automata.epoch.observe(self.access_points.clone(), self.peers.clone());
+        self.access_points.clone()
+    }
+
+    pub fn get_access_points(&mut self) -> Vec<AccessPoint> {
+        let whitelist = self.config.main.whitelist.clone();
+        let aps = self.access_points.clone();
+        let mut filtered_aps: Vec<AccessPoint> = aps
+            .iter()
+            .filter(|ap| whitelist.contains(&ap.bssid))
+            .filter(|ap| whitelist.contains(&ap.ssid))
+            .cloned()
+            .collect();
+
+        filtered_aps.sort_by_key(|ap| ap.signal);
+        self.set_access_points(filtered_aps.clone());
+        filtered_aps
+    }
+
+    pub fn get_total_aps(&self) -> usize {
+        self.access_points.len()
+    }
+
+    pub fn get_aps_on_channel(&self, channel: u8) -> Vec<AccessPoint> {
+        self.access_points
+            .iter()
+            .filter(|ap| ap.channel == channel)
+            .cloned()
+            .collect()
     }
 
     pub fn supported_channels(&self) -> Vec<u8> {

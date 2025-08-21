@@ -1,5 +1,5 @@
-use std::{ collections::HashMap, sync::mpsc::{ sync_channel, Receiver, SyncSender }, time::{ Duration, Instant } };
-use crate::core::{ ai::reward::RewardFunction, config::Config };
+use std::{ collections::HashMap, sync::mpsc::{ sync_channel, Receiver, SyncSender }, time::{ Duration, Instant }, vec };
+use crate::core::{ agent::{AccessPoint, Peer}, ai::reward::RewardFunction, config::Config, mesh::wifi };
 
 pub struct Epoch {
     obs_tx: SyncSender<Observation>,
@@ -62,7 +62,7 @@ pub struct EpochData {
 }
 
 #[derive(Clone)]
-struct Observation {
+pub struct Observation {
     aps_histogram: Vec<f32>,
     sta_histogram: Vec<f32>,
     peers_histogram: Vec<f32>,
@@ -151,10 +151,57 @@ impl Epoch {
 
     pub fn observe(
         &mut self,
-        aps_per_chan: Vec<f32>,
-        sta_per_chan: Vec<f32>,
-        peers_per_chan: Vec<f32>
+        aps: Vec<AccessPoint>,
+        peers: Vec<Peer>,
     ) {
+        let num_aps = aps.len();
+        if num_aps == 0 {
+            self.blind_for += 1;
+        } else {
+            self.blind_for = 0;
+        }
+
+        let bond_unit_scale = self.config.personality.bond_encounters_factor;
+        self.num_peers = peers.len() as u32;
+
+        self.total_bond_factor = aps.iter()
+            .map(|ap| {
+                let bond_factor = ap.signal as f32 / bond_unit_scale as f32;
+                if bond_factor < 0.0 { 0.0 } else { bond_factor }
+            })
+            .sum();
+        self.avg_bond_factor = if num_aps > 0 {
+            self.total_bond_factor / num_aps as f32
+        } else {
+            0.0
+        };
+
+        let num_aps_f = (aps.len() as f32) + 1e-10;
+        let num_sta = aps.iter()
+            .map(|ap| ap.stations.len() as f32)
+            .sum::<f32>() / num_aps_f;
+
+        let mut aps_per_chan = vec![0.0; wifi::NUM_CHANNELS as usize];
+        let mut sta_per_chan = vec![0.0; wifi::NUM_CHANNELS as usize];
+        let mut peers_per_chan = vec![0.0; wifi::NUM_CHANNELS as usize];
+
+        for ap in &aps {
+            let ch_idx = ap.channel - 1;
+            aps_per_chan[ch_idx as usize] += 1.0;
+            sta_per_chan[ch_idx as usize] += ap.clients.len() as f32;
+        }
+
+        for peer in &peers {
+            let ch_idx = peer.last_channel - 1;
+            if ch_idx < wifi::NUM_CHANNELS as u8 {
+                peers_per_chan[ch_idx as usize] += 1.0;
+            }
+        }
+
+        aps_per_chan = aps_per_chan.iter().map(|x| *x / num_aps_f).collect();
+        sta_per_chan = sta_per_chan.iter().map(|x| *x / num_sta).collect();
+        peers_per_chan = peers_per_chan.iter().map(|x| *x / self.num_peers as f32).collect();
+
         self.observation = Observation {
             aps_histogram: aps_per_chan,
             sta_histogram: sta_per_chan,
@@ -165,6 +212,27 @@ impl Epoch {
 
     pub fn next(&mut self) {
         self.epoch_duration = self.epoch_start.elapsed().as_secs_f64();
+
+        if !self.any_activity && !self.did_handshakes {
+            self.inactive_for += 1;
+            self.active_for = 0;
+        } else {
+            self.active_for += 1;
+            self.inactive_for = 0;
+            self.sad_for = 0;
+            self.bored_for = 0;
+        }
+
+        if self.inactive_for >= self.config.personality.sad_num_epochs as u32 {
+            self.bored_for = 0;
+            self.sad_for += 1;
+        } else if self.inactive_for >= self.config.personality.bored_num_epochs as u32 {
+            self.sad_for = 0;
+            self.bored_for += 1;
+        } else {
+            self.sad_for = 0;
+            self.bored_for = 0;
+        }
 
         self.epoch_data = EpochData {
             duration_secs: self.epoch_duration,
@@ -182,7 +250,7 @@ impl Epoch {
             num_deauths: self.num_deauths,
             num_associations: self.num_assocs,
             num_handshakes: self.num_handshakes,
-            reward: self.reward.call(self.epoch as f64, &self.reward_state()),
+            reward: self.reward.call((self.epoch + 1) as u64, &self.reward_state()),
             cpu_load: 0.0,
             mem_usage: 0.0,
             temperature: 0.0,
@@ -205,6 +273,37 @@ impl Epoch {
         self.num_peers = 0;
         self.total_bond_factor = 0.0;
         self.avg_bond_factor = 0.0;
+    }
+
+    pub fn track(&mut self, activity: &str, increment: Option<u32>) {
+        match activity {
+            "deauth" => {
+                self.did_deauth = true;
+                self.num_deauths += increment.unwrap_or(1);
+                self.any_activity = true;
+            },
+            "associate" => {
+                self.did_associate = true;
+                self.num_assocs += increment.unwrap_or(1);
+                self.any_activity = true;
+            },
+            "miss" => {
+                self.num_missed += increment.unwrap_or(1);
+            },
+            "hop" => {
+                self.num_hops += increment.unwrap_or(1);
+                self.did_deauth = false;
+                self.did_associate = false;
+            },
+            "handshake" => {
+                self.num_handshakes += increment.unwrap_or(1);
+                self.did_handshakes = true;
+            },
+            "sleep" => {
+                self.num_slept += increment.unwrap_or(1);
+            },
+            _ => (),
+        }
     }
 
     pub fn wait_for_epoch_data(
