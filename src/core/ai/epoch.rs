@@ -63,9 +63,9 @@ pub struct EpochData {
 
 #[derive(Clone)]
 pub struct Observation {
-    aps_histogram: Vec<f32>,
-    sta_histogram: Vec<f32>,
-    peers_histogram: Vec<f32>,
+    aps: Vec<f32>,
+    sta: Vec<f32>,
+    peers: Vec<f32>,
 }
 
 impl Default for Epoch {
@@ -77,9 +77,9 @@ impl Default for Epoch {
 impl Default for Observation {
     fn default() -> Self {
         Self {
-            aps_histogram: vec![0.0; 256],
-            sta_histogram: vec![0.0; 256],
-            peers_histogram: vec![0.0; 256],
+            aps: vec![0.0; 256],
+            sta: vec![0.0; 256],
+            peers: vec![0.0; 256],
         }
     }
 }
@@ -115,7 +115,7 @@ impl Epoch {
         let (obs_tx, obs_rx) = sync_channel(1);
         let (data_tx, data_rx) = sync_channel(1);
 
-        Epoch {
+        Self {
             obs_tx,
             obs_rx,
             data_tx,
@@ -151,8 +151,8 @@ impl Epoch {
 
     pub fn observe(
         &mut self,
-        aps: Vec<AccessPoint>,
-        peers: Vec<Peer>,
+        aps: &Vec<AccessPoint>,
+        peers: &Vec<Peer>,
     ) {
         let num_aps = aps.len();
         if num_aps == 0 {
@@ -162,7 +162,7 @@ impl Epoch {
         }
 
         let bond_unit_scale = self.config.personality.bond_encounters_factor;
-        self.num_peers = peers.len() as u32;
+        self.num_peers = peers.len().try_into().unwrap_or(0);
 
         self.total_bond_factor = aps.iter()
             .map(|ap| {
@@ -185,27 +185,30 @@ impl Epoch {
         let mut sta_per_chan = vec![0.0; wifi::NUM_CHANNELS as usize];
         let mut peers_per_chan = vec![0.0; wifi::NUM_CHANNELS as usize];
 
-        for ap in &aps {
+        for ap in aps {
             let ch_idx = ap.channel - 1;
             aps_per_chan[ch_idx as usize] += 1.0;
             sta_per_chan[ch_idx as usize] += ap.clients.len() as f32;
         }
 
-        for peer in &peers {
+        for peer in peers {
             let ch_idx = peer.last_channel - 1;
             if ch_idx < wifi::NUM_CHANNELS as u8 {
                 peers_per_chan[ch_idx as usize] += 1.0;
             }
         }
 
+        #[allow(clippy::cast_possible_truncation)]
+        let num_peers_f = (f64::from(self.num_peers) + 1e-10) as f32;
+
         aps_per_chan = aps_per_chan.iter().map(|x| *x / num_aps_f).collect();
         sta_per_chan = sta_per_chan.iter().map(|x| *x / num_sta).collect();
-        peers_per_chan = peers_per_chan.iter().map(|x| *x / self.num_peers as f32).collect();
+        peers_per_chan = peers_per_chan.iter().map(|x| *x / num_peers_f).collect();
 
         self.observation = Observation {
-            aps_histogram: aps_per_chan,
-            sta_histogram: sta_per_chan,
-            peers_histogram: peers_per_chan,
+            aps: aps_per_chan,
+            sta: sta_per_chan,
+            peers: peers_per_chan,
         };
         let _ = self.obs_tx.try_send(self.observation.clone());
     }
@@ -223,10 +226,10 @@ impl Epoch {
             self.bored_for = 0;
         }
 
-        if self.inactive_for >= self.config.personality.sad_num_epochs as u32 {
+        if self.inactive_for >= self.config.personality.sad_num_epochs {
             self.bored_for = 0;
             self.sad_for += 1;
-        } else if self.inactive_for >= self.config.personality.bored_num_epochs as u32 {
+        } else if self.inactive_for >= self.config.personality.bored_num_epochs {
             self.sad_for = 0;
             self.bored_for += 1;
         } else {
@@ -236,7 +239,7 @@ impl Epoch {
 
         self.epoch_data = EpochData {
             duration_secs: self.epoch_duration,
-            slept_for_secs: self.num_slept as f64,
+            slept_for_secs: f64::from(self.num_slept),
             blind_for_epochs: self.blind_for,
             inactive_for_epochs: self.inactive_for,
             active_for_epochs: self.active_for,
@@ -250,7 +253,7 @@ impl Epoch {
             num_deauths: self.num_deauths,
             num_associations: self.num_assocs,
             num_handshakes: self.num_handshakes,
-            reward: self.reward.call((self.epoch + 1) as u64, &self.reward_state()),
+            reward: RewardFunction::call(self.epoch + 1, &self.reward_state()),
             cpu_load: 0.0,
             mem_usage: 0.0,
             temperature: 0.0,
@@ -282,7 +285,7 @@ impl Epoch {
                 self.num_deauths += increment.unwrap_or(1);
                 self.any_activity = true;
             },
-            "associate" => {
+            "association" => {
                 self.did_associate = true;
                 self.num_assocs += increment.unwrap_or(1);
                 self.any_activity = true;
@@ -325,21 +328,21 @@ impl Epoch {
     }
 
     fn data(self) -> EpochData {
-        return self.epoch_data;
+        self.epoch_data
     }
 
     fn reward_state(&self) -> HashMap<&str, f64> {
         let mut state = std::collections::HashMap::new();
-        state.insert("num_deauths", self.num_deauths as f64);
-        state.insert("num_associations", self.num_assocs as f64);
-        state.insert("num_handshakes", self.num_handshakes as f64);
-        state.insert("active_for_epochs", self.active_for as f64);
-        state.insert("blind_for_epochs", self.blind_for as f64);
-        state.insert("inactive_for_epochs", self.inactive_for as f64);
-        state.insert("missed_interactions", self.num_missed as f64);
-        state.insert("num_hops", self.num_hops as f64);
-        state.insert("sad_for_epochs", self.sad_for as f64);
-        state.insert("bored_for_epochs", self.bored_for as f64);
+        state.insert("num_deauths", f64::from(self.num_deauths));
+        state.insert("num_associations", f64::from(self.num_assocs));
+        state.insert("num_handshakes", f64::from(self.num_handshakes));
+        state.insert("active_for_epochs", f64::from(self.active_for));
+        state.insert("blind_for_epochs", f64::from(self.blind_for));
+        state.insert("inactive_for_epochs", f64::from(self.inactive_for));
+        state.insert("missed_interactions", f64::from(self.num_missed));
+        state.insert("num_hops", f64::from(self.num_hops));
+        state.insert("sad_for_epochs", f64::from(self.sad_for));
+        state.insert("bored_for_epochs", f64::from(self.bored_for));
         state
     }
 }

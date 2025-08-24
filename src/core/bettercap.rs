@@ -1,20 +1,37 @@
-use crate::core::config::Config;
+use crate::core::{ agent::AccessPoint, config::Config };
 use crate::core::log::LOGGER;
-
-use std::{collections::HashMap, time::Duration};
+use std::{ collections::HashMap, sync::Arc, time::Duration };
+use std::sync::atomic::{AtomicBool, Ordering};
 use serde_json::Value;
-use tokio::{net::TcpStream, time::sleep};
-use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
+use tokio::{ net::TcpStream};
+use tokio_tungstenite::{ connect_async, MaybeTlsStream, WebSocketStream };
 use tungstenite::protocol::Message;
-use futures_util::stream::{SplitStream, StreamExt};
+use futures_util::{ stream::{ SplitStream, StreamExt }, SinkExt };
+use tokio::sync::broadcast;
 
-#[derive(serde::Deserialize)]
+#[derive(serde::Deserialize, Debug)]
 pub struct BettercapSession {
     pub interfaces: Vec<BInterfaces>,
-    pub modules: HashMap<String, Value>,
+    pub modules: Vec<BModule>,
+    pub wifi: BWifi,
 }
 
-#[derive(serde::Deserialize)]
+#[derive(serde::Deserialize, Debug)]
+pub struct BWifi {
+    pub aps: Vec<AccessPoint>,
+}
+
+#[derive(serde::Deserialize, Debug)]
+pub struct BModule {
+    pub name: String,
+    pub description: String,
+    pub author: String,
+    pub parameters: HashMap<String, Value>,
+    pub running: bool,
+    pub state: HashMap<String, Value>,
+}
+
+#[derive(serde::Deserialize, Debug)]
 pub struct BInterfaces {
     pub index: u32,
     pub mtu: u32,
@@ -25,12 +42,11 @@ pub struct BInterfaces {
     pub addresses: Vec<BInterfaceAddress>,
 }
 
-#[derive(serde::Deserialize)]
+#[derive(serde::Deserialize, Debug)]
 pub struct BInterfaceAddress {
     pub address: String,
     pub r#type: String,
 }
-
 
 #[derive(Debug, Clone)]
 pub struct Bettercap {
@@ -41,7 +57,7 @@ pub struct Bettercap {
     pub max_queue: usize,
     pub min_sleep: f64,
     pub max_sleep: f64,
-    pub is_ready: bool,
+    pub is_ready: Arc<AtomicBool>,
 
     hostname: String,
     port: u16,
@@ -50,11 +66,15 @@ pub struct Bettercap {
     url: String,
     websocket_url: String,
     scheme: String,
+
+    // Broadcast channel for websocket events
+    event_tx: broadcast::Sender<String>,
 }
 
 impl Default for Bettercap {
     fn default() -> Self {
-        Bettercap {
+        let (event_tx, _rx) = broadcast::channel(10_000);
+        Self {
             bettercap_path: "/usr/bin/bettercap".into(),
             retries: 5,
             ping_timeout: 180,
@@ -68,8 +88,9 @@ impl Default for Bettercap {
             username: "user".into(),
             password: "pass".into(),
             url: "%{scheme}://%{username}:%{password}@%{hostname}:%{port}/api".into(),
-            websocket_url: "ws://%{username}:%{password}@%{hostname}:%{port}/api".into(),
-            is_ready: false,
+            websocket_url: "ws://%{username}:%{password}@%{hostname}:%{port}/api/events".into(),
+            is_ready: Arc::new(AtomicBool::new(false)),
+            event_tx,
         }
     }
 }
@@ -80,13 +101,14 @@ impl Bettercap {
     pub fn new(config: &Config) -> Self {
         let scheme = if config.bettercap.port == 443 { "https" } else { "http" };
         let ws_scheme = if config.bettercap.port == 443 { "wss" } else { "ws" };
-        
-        Bettercap {
+        let max_queue = 10_000usize;
+        let (event_tx, _rx) = broadcast::channel(max_queue);
+        Self {
             bettercap_path: config.main.bettercap_path.clone(),
             retries: 5,
             ping_timeout: 180,
             ping_interval: 15,
-            max_queue: 10000,
+            max_queue,
             min_sleep: 0.5,
             max_sleep: 5.0,
             hostname: config.bettercap.hostname.clone(),
@@ -110,118 +132,165 @@ impl Bettercap {
                 config.bettercap.port
             ),
             scheme: scheme.to_string(),
-            is_ready: false,
+            is_ready: Arc::new(AtomicBool::new(false)),
+            event_tx,
         }
     }
 
+    #[must_use]
     pub fn is_ready(&self) -> bool {
-        self.is_ready
+        self.is_ready.load(Ordering::SeqCst)
     }
 
-    pub async fn session(&self, sess: Option<&str>) -> Result<BettercapSession, anyhow::Error> {
+    pub async fn session(&self, sess: Option<&str>) -> Option<BettercapSession> {
         let sess = sess.unwrap_or("session");
+        // Build URL robustly even if self.url still contains placeholders
+        let base = self
+            .url
+            .replace("%{scheme}", &self.scheme)
+            .replace("%{username}", &self.username)
+            .replace("%{password}", &self.password)
+            .replace("%{hostname}", &self.hostname)
+            .replace("%{port}", &self.port.to_string());
+
+        let url = format!("{base}/{sess}");
         let client = reqwest::Client::new();
-        let url = format!("{}/{}", self.url, sess);
-        let body = client.get(url)
+        match client
+            .get(url)
             .basic_auth(&self.username, Some(&self.password))
             .send()
-            .await?
-            .json::<BettercapSession>()
-            .await?;
-
-        Ok(body)
+            .await
+        {
+            Ok(resp) => match resp.json::<BettercapSession>().await {
+                Ok(session) => Some(session),
+                Err(e) => {
+                    LOGGER.log_error("Bettercap", &format!("Failed to parse session JSON: {e}"));
+                    None
+                }
+            },
+            Err(e) => {
+                LOGGER.log_error("Bettercap", &format!("HTTP request failed: {e}"));
+                None
+            }
+        }
     }
 
-    pub async fn start_websocket<F>(&mut self, mut consumer: F)
-    where
-        F: FnMut(String) -> Result<(), ()> + Send + 'static,
-    {
-        let ws_url = &self.websocket_url;
-
+    // Start the websocket event loop and broadcast incoming text messages to subscribers.
+    pub async fn run_websocket(&self) {
+        let ws_url = self.websocket_url.clone();
+        let min_sleep = self.min_sleep;
+        let max_sleep = self.max_sleep;
         loop {
-            LOGGER.log_info("Bettercap", &format!("Connecting to WebSocket: {}", ws_url));
-            match connect_async(ws_url).await {
+            LOGGER.log_info("Bettercap", &format!("Connecting websocket to {ws_url}"));
+            match connect_async(&ws_url).await {
                 Ok((ws_stream, _)) => {
-                    self.is_ready = true;
+                    self.is_ready.store(true, Ordering::SeqCst);
                     LOGGER.log_info("Bettercap", "WebSocket connected");
-                    let (_, mut read) = ws_stream.split();
-
-                    // Listen for messages
+                    let (mut write, mut read) = ws_stream.split();
                     while let Some(msg) = read.next().await {
                         match msg {
                             Ok(Message::Text(txt)) => {
-                                let _ = consumer(txt.to_string());
-                                if let Ok(json) = serde_json::from_str::<serde_json::Value>(&txt) {
-                                    if let Some(event_type) = json.get("type") {
-                                        LOGGER.log_info("Bettercap", &format!("Received event type: {}", event_type));
-                                    }
-                                }
+                                // Broadcast to subscribers; ignore lagging receivers' errors
+                                let _ = self.event_tx.send(txt.to_string());
                             }
                             Ok(Message::Binary(_)) => {
-                                LOGGER.log_info("Bettercap", "Received binary message");
+                                LOGGER.log_debug("Bettercap", "Ignoring binary WS frame");
+                            }
+                            Ok(Message::Ping(_) | Message::Pong(_) | Message::Frame(_)) => {
+                                // Let tungstenite handle ping/pong automatically; nothing to do
                             }
                             Ok(Message::Close(_)) => {
-                                LOGGER.log_info("Bettercap", "WebSocket closed by server.");
-                                self.is_ready = false;
+                                LOGGER.log_warning("Bettercap", "WebSocket closed by server");
+                                self.is_ready.store(false, Ordering::SeqCst);
                                 break;
                             }
                             Err(e) => {
                                 LOGGER.log_error("Bettercap", &format!("WebSocket error: {e}"));
-                                self.is_ready = false;
-                                break;
+                                self.is_ready.store(false, Ordering::SeqCst);
+                                // Try a ping to see if the connection can be kept alive
+                                if let Err(ping_err) = write.send(Message::Ping(vec![].into())).await {
+                                    LOGGER.log_warning("Bettercap", &format!("Ping failed: {ping_err}, reconnecting..."));
+                                    break;
+                                }
+                                LOGGER.log_warning("Bettercap", "Ping OK, keeping connection alive...");
                             }
-                            _ => {}
                         }
                     }
                 }
                 Err(e) => {
-                    LOGGER.log_error("Bettercap", &format!("Failed to connect: {e}"));
-                    self.is_ready = false;
+                    LOGGER.log_error("Bettercap", &format!("WebSocket connect failed: {e}"));
                 }
             }
-            let sleep_time = self.min_sleep + (self.max_sleep - self.min_sleep) * rand::random::<f64>();
-            LOGGER.log_info("Bettercap", &format!("Retrying in {:.1} seconds...", sleep_time));
-            sleep(Duration::from_secs_f64(sleep_time)).await;
+            // Backoff before reconnecting
+            let sleep_time = (max_sleep - min_sleep).mul_add(rand::random::<f64>(), min_sleep);
+            LOGGER.log_info("Bettercap", &format!("Reconnecting in {sleep_time:.1} seconds"));
+            tokio::time::sleep(Duration::from_secs_f64(sleep_time)).await;
         }
     }
+    
+    pub fn subscribe_events(&self) -> broadcast::Receiver<String> {
+        self.event_tx.subscribe()
+    }
 
+    /// Sends a command to Bettercap via HTTP POST.
+    ///
+    /// # Arguments
+    ///
+    /// * `args` - A slice of command arguments to send.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the HTTP request fails or if Bettercap does not respond successfully after all retries.
     pub async fn run(&self, args: &[&str]) -> Result<(), anyhow::Error> {
-      let url = self.url
-        .replace("%{scheme}", &self.scheme)
-        .replace("%{username}", &self.username)
-        .replace("%{password}", &self.password)
-        .replace("%{hostname}", &self.hostname)
-        .replace("%{port}", &self.port.to_string())
-        + "/session";
+        let url =
+            self.url
+                .replace("%{scheme}", &self.scheme)
+                .replace("%{username}", &self.username)
+                .replace("%{password}", &self.password)
+                .replace("%{hostname}", &self.hostname)
+                .replace("%{port}", &self.port.to_string()) + "/session"
+                .trim_end_matches('/');
 
-      LOGGER.log_info("Bettercap", &format!("Commanding Bettercap to {}", args.join(" ")));
+            
+            let mut retries_left = self.retries;
+            let client = reqwest::Client::new();
+            let cmd: String = args.join(" ");
 
-      let mut retries_left = self.retries;
-      let client = reqwest::Client::new();
+            
+            loop {
+                LOGGER.log_debug("Bettercap", &format!("Commanding Bettercap to {cmd}"));
+                LOGGER.log_debug("Bettercap", &format!("{}", &serde_json::json!({"cmd": cmd})));
+            let req = client
+                .post(&url)
+                .json(&serde_json::json!({"cmd": cmd}))
+                .basic_auth(&self.username, Some(&self.password))
+                .timeout(Duration::from_secs(2));
 
-      loop {
-        let req = client.post(&url)
-          .json(&serde_json::json!({"cmd": args.join(" ")}))
-          .header("Content-Type", "application/json")
-          .basic_auth(&self.username, Some(&self.password));
-
-        let res = req.send().await?;
-
-        if res.status().is_success() {
-          let body = res.text().await?;
-          LOGGER.log_info("Bettercap", &format!("Response: {}", body));
-          break Ok(());
-        } else {
-          let status = res.status();
-          let body = res.text().await?;
-          LOGGER.log_error("Bettercap", &format!("Error: {} - {}", status, body));
-          if retries_left == 0 {
-            break Err(anyhow::anyhow!("Max retries reached"));
-          }
-          LOGGER.log_info("Bettercap", &format!("Retrying in {} seconds...", self.ping_interval));
-          retries_left -= 1;
-          sleep(Duration::from_secs(self.ping_interval)).await;
+            match req.send().await {
+                Ok(resp) => {
+                    if resp.status().is_success() {
+                        return Ok(());
+                    }
+                    LOGGER.log_error(
+                        "Bettercap",
+                        &format!("Request failed with status {}", resp.status()),
+                    );
+                }
+                Err(e) => {
+                    if !e.is_connect() {
+                        // The server clearly got the request but didnt like it
+                        // Dont try this again.
+                        return Ok(())
+                    }
+                    LOGGER.log_error("Bettercap", &format!("Request failed: {e}"));
+                    
+                }
+            }
+            if retries_left == 0 {
+                return Err(anyhow::anyhow!("Request failed"));
+            }
+            retries_left -= 1;
+            tokio::time::sleep(Duration::from_secs(self.ping_interval)).await;
         }
-      }
     }
 }

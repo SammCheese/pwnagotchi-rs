@@ -10,12 +10,12 @@ pub use personality::PersonalityConfig;
 pub use fs::FSConfig;
 pub use plugins::PluginConfig;
 
-use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, path::Path};
 
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
+#[derive(Default)]
 pub struct Config {
   pub main: MainConfig,
   pub bettercap: BettercapConfig,
@@ -24,34 +24,23 @@ pub struct Config {
   pub fs: FSConfig,
 }
 
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            main: MainConfig::default(),
-            bettercap: BettercapConfig::default(),
-            plugins: HashMap::new(),
-            personality: PersonalityConfig::default(),
-            fs: FSConfig::default(),
-        }
-    }
-}
 
 impl Config {
     pub fn load<P: AsRef<Path>>(path: P) -> Result<Self, String> {
         let config_str = std::fs::read_to_string(path)
-            .map_err(|e| format!("Failed to read config file: {}", e))?;
-        toml::from_str(&config_str).map_err(|e| format!("Failed to parse config file: {}", e))
+            .map_err(|e| format!("Failed to read config file: {e}"))?;
+        toml::from_str(&config_str).map_err(|e| format!("Failed to parse config file: {e}"))
     }
 
     pub fn save<P: AsRef<Path>>(&self, path: P) -> Result<(), String> {
         let config_str =
-            toml::to_string(self).map_err(|e| format!("Failed to serialize config: {}", e))?;
+            toml::to_string(self).map_err(|e| format!("Failed to serialize config: {e}"))?;
         std::fs::write(path, config_str)
-            .map_err(|e| format!("Failed to write config file: {}", e))
-            .map(|_| ())
+            .map_err(|e| format!("Failed to write config file: {e}"))?;
+        Ok(())
     }
 }
 
 
-pub static CONFIG: Lazy<Config> =
-    Lazy::new(|| Config::load("config.toml").unwrap_or_default());
+pub static CONFIG: std::sync::LazyLock<Config> =
+    std::sync::LazyLock::new(|| Config::load("config.toml").unwrap_or_default());

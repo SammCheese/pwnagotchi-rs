@@ -21,8 +21,8 @@ pub struct PersonalityConfig {
   pub bored_num_epochs: u32,
   pub sad_num_epochs: u32,
   pub bond_encounters_factor: u32,
-  pub throttle_a: f64,
-  pub throttle_d: f64,
+  pub throttle_a: f32,
+  pub throttle_d: f32,
 }
 
 impl Default for PersonalityConfig {
@@ -31,7 +31,7 @@ impl Default for PersonalityConfig {
       advertise: true,
       deauth: true,
       associate: true,
-      channels: vec![],
+      channels: vec![], // Limits actions to these channels
       min_rssi: -200,
       ap_ttl: 120,
       sta_ttl: 300,

@@ -1,3 +1,4 @@
+#![allow(clippy::cast_possible_truncation)]
 pub static NUM_CHANNELS: i16 = 233;
 
 // Frequency in MHz to channel number
