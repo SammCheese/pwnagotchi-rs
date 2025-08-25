@@ -1,52 +1,13 @@
-use crate::core::{ agent::AccessPoint, config::Config };
+use crate::core::models::bettercap::BettercapSession;
+use crate::core::config::Config;
 use crate::core::log::LOGGER;
-use std::{ collections::HashMap, sync::Arc, time::Duration };
+use std::{sync::Arc, time::Duration };
 use std::sync::atomic::{AtomicBool, Ordering};
-use serde_json::Value;
 use tokio::{ net::TcpStream};
 use tokio_tungstenite::{ connect_async, MaybeTlsStream, WebSocketStream };
 use tungstenite::protocol::Message;
 use futures_util::{ stream::{ SplitStream, StreamExt }, SinkExt };
 use tokio::sync::broadcast;
-
-#[derive(serde::Deserialize, Debug)]
-pub struct BettercapSession {
-    pub interfaces: Vec<BInterfaces>,
-    pub modules: Vec<BModule>,
-    pub wifi: BWifi,
-}
-
-#[derive(serde::Deserialize, Debug)]
-pub struct BWifi {
-    pub aps: Vec<AccessPoint>,
-}
-
-#[derive(serde::Deserialize, Debug)]
-pub struct BModule {
-    pub name: String,
-    pub description: String,
-    pub author: String,
-    pub parameters: HashMap<String, Value>,
-    pub running: bool,
-    pub state: HashMap<String, Value>,
-}
-
-#[derive(serde::Deserialize, Debug)]
-pub struct BInterfaces {
-    pub index: u32,
-    pub mtu: u32,
-    pub name: String,
-    pub mac: String,
-    pub vendor: String,
-    pub flags: Vec<String>,
-    pub addresses: Vec<BInterfaceAddress>,
-}
-
-#[derive(serde::Deserialize, Debug)]
-pub struct BInterfaceAddress {
-    pub address: String,
-    pub r#type: String,
-}
 
 #[derive(Debug, Clone)]
 pub struct Bettercap {
@@ -82,7 +43,7 @@ impl Default for Bettercap {
             max_queue: 10000,
             min_sleep: 0.5,
             max_sleep: 5.0,
-            hostname: "localhost".into(),
+            hostname: "127.0.0.1".into(),
             scheme: "http".into(),
             port: 8081,
             username: "user".into(),
@@ -144,7 +105,7 @@ impl Bettercap {
 
     pub async fn session(&self, sess: Option<&str>) -> Option<BettercapSession> {
         let sess = sess.unwrap_or("session");
-        // Build URL robustly even if self.url still contains placeholders
+
         let base = self
             .url
             .replace("%{scheme}", &self.scheme)
@@ -155,17 +116,24 @@ impl Bettercap {
 
         let url = format!("{base}/{sess}");
         let client = reqwest::Client::new();
-        match client
+        let cli = client
             .get(url)
             .basic_auth(&self.username, Some(&self.password))
             .send()
-            .await
+            .await;
+
+        match cli
         {
-            Ok(resp) => match resp.json::<BettercapSession>().await {
-                Ok(session) => Some(session),
-                Err(e) => {
-                    LOGGER.log_error("Bettercap", &format!("Failed to parse session JSON: {e}"));
-                    None
+            Ok(resp) =>  {
+                match resp.json::<BettercapSession>().await {
+                    Ok(session) => {
+                        LOGGER.log_debug("Bettercap", &format!("{session:?}"));
+                        Some(session)
+                    },
+                    Err(e) => {
+                        LOGGER.log_error("Bettercap", &format!("Failed to parse session JSON: {e}"));
+                        None
+                    }
                 }
             },
             Err(e) => {
@@ -175,7 +143,6 @@ impl Bettercap {
         }
     }
 
-    // Start the websocket event loop and broadcast incoming text messages to subscribers.
     pub async fn run_websocket(&self) {
         let ws_url = self.websocket_url.clone();
         let min_sleep = self.min_sleep;

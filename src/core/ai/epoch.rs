@@ -1,3 +1,4 @@
+#![allow(clippy::cast_possible_truncation, clippy::cast_precision_loss, clippy::struct_excessive_bools)]
 use std::{ collections::HashMap, sync::mpsc::{ sync_channel, Receiver, SyncSender }, time::{ Duration, Instant }, vec };
 use crate::core::{ agent::{AccessPoint, Peer}, ai::reward::RewardFunction, config::Config, mesh::wifi };
 
@@ -166,24 +167,28 @@ impl Epoch {
 
         self.total_bond_factor = aps.iter()
             .map(|ap| {
-                let bond_factor = ap.signal as f32 / bond_unit_scale as f32;
+                #[allow(clippy::cast_possible_truncation)]
+                let bond_factor = (f64::from(ap.rssi) / f64::from(bond_unit_scale)) as f32;
                 if bond_factor < 0.0 { 0.0 } else { bond_factor }
             })
-            .sum();
+            .sum::<f32>();
         self.avg_bond_factor = if num_aps > 0 {
             self.total_bond_factor / num_aps as f32
         } else {
             0.0
         };
 
-        let num_aps_f = (aps.len() as f32) + 1e-10;
+        #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
+        let num_aps_f = (aps.len() as f64) as f32 + 1e-10;
+
         let num_sta = aps.iter()
-            .map(|ap| ap.stations.len() as f32)
+            .map(|ap| ap.clients.len() as u32 as f32)
             .sum::<f32>() / num_aps_f;
 
-        let mut aps_per_chan = vec![0.0; wifi::NUM_CHANNELS as usize];
-        let mut sta_per_chan = vec![0.0; wifi::NUM_CHANNELS as usize];
-        let mut peers_per_chan = vec![0.0; wifi::NUM_CHANNELS as usize];
+        let num_channels = usize::try_from(wifi::NUM_CHANNELS).unwrap_or(0);
+        let mut aps_per_chan = vec![0.0; num_channels];
+        let mut sta_per_chan = vec![0.0; num_channels];
+        let mut peers_per_chan = vec![0.0; num_channels];
 
         for ap in aps {
             let ch_idx = ap.channel - 1;
@@ -193,7 +198,7 @@ impl Epoch {
 
         for peer in peers {
             let ch_idx = peer.last_channel - 1;
-            if ch_idx < wifi::NUM_CHANNELS as u8 {
+            if ch_idx < num_channels as u8 {
                 peers_per_chan[ch_idx as usize] += 1.0;
             }
         }

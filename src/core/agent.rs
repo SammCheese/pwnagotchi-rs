@@ -5,13 +5,15 @@ use std::thread::sleep;
 use tokio::sync::mpsc::{ self, Receiver, error::TryRecvError, Sender };
 use serde::{ Deserialize, Serialize };
 
+use crate::core::models::bettercap::Meta;
 use crate::core::{
     automata::Automata,
-    bettercap::{ Bettercap, BettercapSession },
+    bettercap::Bettercap,
+    models::bettercap::BettercapSession,
     config::Config,
     identity::Identity,
     log::LOGGER,
-    utils::{ self, iface_channels },
+    utils::{ self },
 };
 
 const WIFI_RECON: &str = "wifi.recon";
@@ -38,20 +40,48 @@ pub struct Agent {
 
 #[derive(serde::Deserialize, Debug, Clone)]
 pub struct Station {
+    pub ipv4: String,
+    pub ipv6: String,
     pub mac: String,
     pub hostname: String,
+    pub alias: String,
     pub vendor: String,
+    pub first_seen: String,
+    pub last_seen: String,
+    pub meta: Meta,
+    pub frequency: u32,
+    pub channel: u8,
+    pub rssi: i32,
+    pub sent: u32,
+    pub received: u32,
+    pub encryption: String,
+    pub cipher: String,
+    pub authentication: String,
+    pub wps: HashMap<String, String>
 }
 
 #[derive(serde::Deserialize, Debug, Clone)]
 pub struct AccessPoint {
-    pub channel: u8,
-    pub signal: i32,
+    pub ipv4: String,
+    pub ipv6: String,
     pub mac: String,
-    pub encryption: String,
     pub hostname: String,
-    pub stations: Vec<Station>,
+    pub alias: String,
+    pub vendor: String,
+    pub first_seen: String,
+    pub last_seen: String,
+    pub meta: Meta,
+    pub frequency: u32,
+    pub channel: u8,
+    pub rssi: i32,
+    pub sent: u32,
+    pub received: u32,
+    pub encryption: String,
+    pub cipher: String,
+    pub authentication: String,
+    pub wps: HashMap<String, String>,
     pub clients: Vec<Station>,
+    pub handshake: bool
 }
 
 #[derive(Debug, Clone)]
@@ -204,8 +234,7 @@ impl Agent {
         let mut has_iface = false;
 
         while !has_iface {
-            let bc = self.bettercap.clone();
-            let session_result = bc.session(None).await;
+            let session_result = self.bettercap.session(None).await;
 
             if let Some(session) = session_result {
                 for iface in session.interfaces {
@@ -248,8 +277,8 @@ impl Agent {
                             "Agent",
                             &format!("Monitor interface {interface} not found, waiting...")
                         );
-                        tokio::time::sleep(Duration::from_secs(5)).await;
                     }
+                    tokio::time::sleep(Duration::from_secs(5)).await;
                 }
             }
         }
@@ -440,13 +469,13 @@ impl Agent {
 
     pub async fn get_access_points_by_channel(&mut self) -> Vec<(u8, Vec<AccessPoint>)> {
       let aps = self.get_access_points().await;
-      let channels: &HashSet<u8> = &self.config.personality.channels.iter().cloned().collect();
+      let channels: &HashSet<u8> = &self.config.personality.channels.iter().copied().collect();
       let mut grouped: HashMap<u8, Vec<AccessPoint>> = HashMap::new();
 
       LOGGER.log_debug("Agent", &format!("{} APS", aps.len()));
 
       for ap in aps {
-          if channels.contains(&ap.channel) {
+          if channels.contains(&ap.channel) || channels.is_empty() {
               grouped.entry(ap.channel).or_default().push(ap);
           }
       }
@@ -529,12 +558,12 @@ impl Agent {
                     ap.hostname,
                     ap.channel,
                     ap.clients.len(),
-                    ap.signal
+                    ap.rssi
                 )
             );
 
             let mac = ap.mac.clone();
-            match self.bettercap.run(&["wifi.associate", &mac]).await {
+            match self.bettercap.run(&["wifi.assoc", &mac]).await {
                 Ok(()) => {
                     LOGGER.log_info(
                         "AGENT",
@@ -584,7 +613,7 @@ impl Agent {
                     ap.hostname,
                     ap.channel,
                     ap.clients.len(),
-                    ap.signal
+                    ap.rssi
                 )
             );
 
@@ -670,7 +699,7 @@ impl Agent {
           }
       }
 
-      aps.sort_by_key(|ap| -ap.signal);
+      aps.sort_by_key(|ap| -ap.rssi);
 
       self.set_access_points(aps.clone());
 
@@ -706,10 +735,11 @@ impl Agent {
 
     #[must_use]
     pub fn supported_channels(&self) -> Vec<u8> {
-        iface_channels(&self.config.main.interface)
+        self.supported_channels.clone()
     }
 
     #[must_use]
+    #[allow(clippy::future_not_send)]
     pub async fn is_module_running(&self, module: &str) -> bool {
         match self.bettercap.session(None).await {
             Some(session) => session.modules.iter().any(|m| m.name == module && m.running),
@@ -729,11 +759,7 @@ impl Agent {
                         if sta.mac == sta_mac {
                             return Some((
                                 ap.clone(),
-                                Station {
-                                    mac: sta.mac.clone(),
-                                    hostname: sta.hostname.clone(),
-                                    vendor: sta.vendor.clone(),
-                                },
+                                sta.clone()
                             ));
                         }
                     }
@@ -751,24 +777,16 @@ impl Agent {
                     if sta.mac == sta_mac {
                         return Some((
                             ap.clone(),
-                            Station {
-                                mac: sta.mac.clone(),
-                                hostname: sta.hostname.clone(),
-                                vendor: sta.vendor.clone(),
-                            },
+                            sta.clone()
                         ));
                     }
                 }
                 // Some data sources might use stations instead of clients
-                for sta in &ap.stations {
+                for sta in &ap.clients {
                     if sta.mac == sta_mac {
                         return Some((
                             ap.clone(),
-                            Station {
-                                mac: sta.mac.clone(),
-                                hostname: sta.hostname.clone(),
-                                vendor: sta.vendor.clone(),
-                            },
+                            sta.clone()
                         ));
                     }
                 }

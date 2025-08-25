@@ -24,6 +24,7 @@
     pub mod mesh;
     pub mod automata;
     pub mod cli;
+    pub mod models;
 }
 
 mod traits {
