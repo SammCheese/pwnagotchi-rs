@@ -1,47 +1,65 @@
-use std::time::Duration;
+use std::{ sync::Arc, time::Duration };
 //use std::thread::sleep;
-use tokio::time::sleep;
+use tokio::{ sync::Mutex, time::sleep };
 
-use crate::core::{ agent::Agent, log::LOGGER };
+use crate::core::{ agent::{ Agent, RunningMode }, log::LOGGER };
 
 #[allow(clippy::future_not_send)]
-pub async fn do_auto_mode(agent: &mut Agent) {
-    LOGGER.log_info("Pwnagotchi", "Starting auto mode...");
+pub async fn do_auto_mode(agent: Arc<Mutex<Agent>>) {
+  LOGGER.log_info("Pwnagotchi", "Starting auto mode...");
 
-    agent.mode = "auto".to_string();
-    agent.start().await;
+  {
+    let mut a = agent.lock().await;
+    a.mode = RunningMode::Auto;
+    a.start().await;
+    drop(a);
+  }
 
-    loop {
-        agent.drain_events();
-        agent.recon().await;
-        let channels = agent.get_access_points_by_channel().await;
-        LOGGER.log_info(
-            "Pwnagotchi",
-            &format!("Found {} channels with access points", channels.len())
-        );
+  loop {
+    let channels = {
+      let mut a = agent.lock().await;
+      a.recon().await;
+      a.get_access_points_by_channel().await
+    };
+    LOGGER.log_info("Pwnagotchi", &format!("Found {} channels with access points", channels.len()));
 
-        for (ch, aps) in channels {
-            sleep(Duration::from_secs(5)).await;
-            agent.drain_events();
-            agent.set_channel(ch).await;
+    for (ch, aps) in channels {
+      {
+        agent.lock().await.set_channel(ch).await;
+      }
+      sleep(Duration::from_secs(5)).await;
 
-            if !agent.automata.is_stale() && agent.automata.any_activity() {
-                LOGGER.log_info(
-                    "Pwnagotchi",
-                    &format!("{} access points on channel {}", aps.len(), ch)
-                );
-            }
-
-            for ap in aps {
-                agent.associate(&ap, None).await;
-                for sta in &ap.clients {
-                    agent.deauth(&ap, sta, None).await;
-                    sleep(Duration::from_secs(1)).await;
-                    agent.drain_events();
-                }
-            }
+      {
+        let mut a = agent.lock().await;
+        if !a.automata.is_stale() && a.automata.any_activity() {
+          LOGGER.log_info("Pwnagotchi", &format!("{} APs on channel {}", aps.len(), ch));
         }
+      }
 
-        agent.automata.next_epoch();
+      for ap in aps {
+        {
+          agent.lock().await.associate(&ap, None).await;
+        }
+        for sta in &ap.clients {
+          {
+            agent.lock().await.deauth(&ap, sta, None).await;
+          }
+          sleep(Duration::from_secs(1)).await;
+        }
+      }
     }
+
+    {
+      let mut a = agent.lock().await;
+      a.automata.next_epoch();
+    }
+  }
+}
+
+pub async fn do_manual_mode(_agent: Arc<Mutex<Agent>>) {
+  LOGGER.log_info("Pwnagotchi", "Starting in manual mode...");
+
+  loop {
+    sleep(Duration::from_secs(60)).await;
+  }
 }

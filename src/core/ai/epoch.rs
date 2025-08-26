@@ -1,11 +1,12 @@
 #![allow(clippy::cast_possible_truncation, clippy::cast_precision_loss, clippy::struct_excessive_bools)]
-use std::{ collections::HashMap, sync::mpsc::{ sync_channel, Receiver, SyncSender }, time::{ Duration, Instant }, vec };
+use std::{ collections::HashMap, time::{ Duration, Instant }, vec };
 use crate::core::{ agent::{AccessPoint, Peer}, ai::reward::RewardFunction, config::Config, mesh::wifi };
+use tokio::sync::mpsc::{Receiver, Sender, channel};
 
 pub struct Epoch {
-    obs_tx: SyncSender<Observation>,
+    obs_tx: Sender<Observation>,
     obs_rx: Receiver<Observation>,
-    data_tx: SyncSender<EpochData>,
+    data_tx: Sender<EpochData>,
     data_rx: Receiver<EpochData>,
     pub epoch: u64,
     pub config: Config,
@@ -113,8 +114,8 @@ impl Default for EpochData {
 
 impl Epoch {
     pub fn new() -> Self {
-        let (obs_tx, obs_rx) = sync_channel(1);
-        let (data_tx, data_rx) = sync_channel(1);
+        let (obs_tx, obs_rx) = channel(1);
+        let (data_tx, data_rx) = channel(1);
 
         Self {
             obs_tx,
@@ -314,14 +315,19 @@ impl Epoch {
         }
     }
 
-    pub fn wait_for_epoch_data(
-        &self,
+    pub async fn wait_for_epoch_data(
+        &mut self,
         with_observation: bool,
         timeout: Option<Duration>
     ) -> Option<(Option<Observation>, EpochData)> {
         let data = match timeout {
-            Some(t) => self.data_rx.recv_timeout(t).ok()?,
-            None => self.data_rx.recv().ok()?,
+            Some(t) => {
+                match tokio::time::timeout(t, self.data_rx.recv()).await {
+                    Ok(Some(data)) => data,
+                    _ => return None,
+                }
+            },
+            None => self.data_rx.recv().await?,
         };
 
         if with_observation {

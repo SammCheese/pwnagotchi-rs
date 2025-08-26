@@ -4,28 +4,28 @@ use crate::core::agent::AccessPoint;
 
 #[derive(serde::Deserialize, Debug)]
 pub struct BettercapSession {
-    pub version: String,
-    pub os: String,
-    pub arch: String,
-    pub goversion: String,
-    pub resources: BResources,
-    pub interfaces: Vec<BInterfaces>,
-    pub options: HashMap<String, Value>,
-    pub interface: BInterface,
-    pub gateway: BInterface,
-    pub env: BEnv,
-    pub lan: BLan,
-    pub wifi: BWifi,
-    pub ble: BGeneric,
-    pub hid: BGeneric,
-    pub can: BGeneric,
-    pub packets: BPackets,
-    pub started_at: String,
-    pub polled_at: String,
-    pub active: bool,
-    pub gps: BGps,
-    pub modules: Vec<BModule>,
-    pub caplets: Vec<BCaplets>,
+  pub version: String,
+  pub os: String,
+  pub arch: String,
+  pub goversion: String,
+  pub resources: BResources,
+  pub interfaces: Vec<BInterfaces>,
+  pub options: HashMap<String, Value>,
+  pub interface: BInterface,
+  pub gateway: BInterface,
+  pub env: BEnv,
+  pub lan: BLan,
+  pub wifi: BWifi,
+  pub ble: BGeneric,
+  pub hid: BGeneric,
+  pub can: BGeneric,
+  pub packets: BPackets,
+  pub started_at: String,
+  pub polled_at: String,
+  pub active: bool,
+  pub gps: BGps,
+  pub modules: Vec<BModule>,
+  pub caplets: Vec<BCaplets>,
 }
 
 #[derive(serde::Deserialize, Debug)]
@@ -106,41 +106,41 @@ pub struct BResources {
 
 #[derive(serde::Deserialize, Debug)]
 pub struct BCaplets {
-    pub path: String,
-    pub size: u64,
-    pub code: Vec<String>,
-    pub name: String,
-    pub scripts: Vec<BScripts>,
+  pub path: String,
+  pub size: u64,
+  pub code: Vec<String>,
+  pub name: String,
+  pub scripts: Vec<BScripts>,
 }
 
 #[derive(serde::Deserialize, Debug)]
 pub struct BScripts {
-    pub path: String,
-    pub size: u64,
-    pub code: Vec<String>,
+  pub path: String,
+  pub size: u64,
+  pub code: Vec<String>,
 }
 
 #[derive(serde::Deserialize, Debug)]
 pub struct BWifi {
-    pub aps: Vec<AccessPoint>,
+  pub aps: Vec<AccessPoint>,
 }
 
 #[derive(serde::Deserialize, Debug)]
 pub struct BModule {
-    pub name: String,
-    pub description: String,
-    pub author: String,
-    pub parameters: HashMap<String, BModuleParameters>,
-    pub handlers: Vec<BModuleHandler>,
-    pub running: bool,
-    pub state: HashMap<String, Value>,
+  pub name: String,
+  pub description: String,
+  pub author: String,
+  pub parameters: HashMap<String, BModuleParameters>,
+  pub handlers: Vec<BModuleHandler>,
+  pub running: bool,
+  pub state: HashMap<String, Value>,
 }
 
 #[derive(serde::Deserialize, Debug)]
 pub struct BModuleHandler {
-    pub name: String,
-    pub description: String,
-    pub parser: String,
+  pub name: String,
+  pub description: String,
+  pub parser: String,
 }
 
 #[derive(serde::Deserialize, Debug)]
@@ -155,17 +155,17 @@ pub struct BModuleParameters {
 
 #[derive(serde::Deserialize, Debug)]
 pub struct BInterfaces {
-    pub index: u32,
-    pub mtu: u32,
-    pub name: String,
-    pub mac: String,
-    pub vendor: String,
-    pub flags: Vec<String>,
-    pub addresses: Vec<BInterfaceAddress>,
+  pub index: u32,
+  pub mtu: u32,
+  pub name: String,
+  pub mac: String,
+  pub vendor: String,
+  pub flags: Vec<String>,
+  pub addresses: Vec<BInterfaceAddress>,
 }
 
 #[derive(serde::Deserialize, Debug)]
 pub struct BInterfaceAddress {
-    pub address: String,
-    pub r#type: String
+  pub address: String,
+  pub r#type: String,
 }

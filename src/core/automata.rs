@@ -1,25 +1,24 @@
-use std::time::Duration;
-use tokio::time::sleep;
-use crate::core::{ai::Epoch, config::Config, log::LOGGER};
+use crate::core::{ ai::Epoch, config::config, log::LOGGER, ui::view::View };
 
 pub struct Automata {
-  config: Config,
-  pub epoch: Epoch
+  pub epoch: Epoch,
+  pub view: View,
 }
 
 impl Default for Automata {
   fn default() -> Self {
-    let config = Config::default();
     let epoch = Epoch::new();
-    Self { config, epoch }
+    let view = View::default();
+    Self { epoch, view }
   }
 }
 
 impl Automata {
   #[must_use]
-  pub fn new(config: Config) -> Self {
+  pub fn new() -> Self {
     let epoch = Epoch::new();
-    Self { config, epoch }
+    let view = View::default();
+    Self { epoch, view }
   }
 
   pub fn on_miss(&mut self) {
@@ -42,16 +41,17 @@ impl Automata {
     self.has_support_network_for(1.0)
   }
 
-  pub const fn set_grateful(&mut self) {
-    // TODO
+  pub fn set_grateful(&mut self) {
+    LOGGER.log_info("Automata", "Unit is grateful.");
   }
 
-  pub const fn set_lonely(&mut self) {
-    // TODO
+  pub fn set_lonely(&mut self) {
+    LOGGER.log_info("Automata", "Unit is lonely.");
   }
 
   pub fn set_bored(&mut self) {
-    let factor = f64::from(self.epoch.inactive_for) / f64::from(self.config.personality.bored_num_epochs);
+    let factor =
+      f64::from(self.epoch.inactive_for) / f64::from(config().personality.bored_num_epochs);
     #[allow(clippy::cast_possible_truncation)]
     if self.has_support_network_for(factor as f32) {
       LOGGER.log_info("Automata", "Unit is grateful instead of bored");
@@ -62,7 +62,8 @@ impl Automata {
   }
 
   pub fn set_sad(&mut self) {
-    let factor = f64::from(self.epoch.inactive_for) / f64::from(self.config.personality.sad_num_epochs);
+    let factor =
+      f64::from(self.epoch.inactive_for) / f64::from(config().personality.sad_num_epochs);
     #[allow(clippy::cast_possible_truncation)]
     if self.has_support_network_for(factor as f32) {
       LOGGER.log_info("Automata", "Unit is grateful instead of sad");
@@ -85,13 +86,13 @@ impl Automata {
     LOGGER.log_info("Automata", "Unit is excited!");
   }
 
-  pub async fn wait_for(&mut self, duration: u32, _sleeping: Option<bool>) {
+  pub fn wait_for(&mut self, duration: u32, sleeping: Option<bool>) {
     self.epoch.track("sleep", Some(duration));
-    sleep(Duration::from_secs(duration.into())).await;
+    self.view.wait(duration.into(), sleeping);
   }
 
-  pub const fn is_stale(&mut self) -> bool {
-    self.epoch.num_missed > self.config.personality.max_misses_for_recon
+  pub fn is_stale(&mut self) -> bool {
+    self.epoch.num_missed > config().personality.max_misses_for_recon
   }
 
   #[must_use]
@@ -100,15 +101,15 @@ impl Automata {
   }
 
   pub fn next_epoch(&mut self) {
-    LOGGER.log_debug("Automata", "Advancing to next epoch");
-    
+    LOGGER.log_debug("Automata", &format!("Advancing to next epoch {} -> {}", self.epoch.epoch, self.epoch.epoch + 1));
+
     let was_stale = self.is_stale();
     let did_miss = self.epoch.num_missed;
 
     self.epoch.next();
 
     if was_stale {
-      let factor = f64::from(did_miss) / f64::from(self.config.personality.max_misses_for_recon);
+      let factor = f64::from(did_miss) / f64::from(config().personality.max_misses_for_recon);
       #[allow(clippy::cast_possible_truncation)]
       let factor = factor as f32;
       if factor >= 2.0 {
@@ -118,7 +119,7 @@ impl Automata {
         self.set_lonely();
       }
     } else if self.epoch.sad_for > 0 {
-      let factor = f64::from(self.epoch.sad_for) / f64::from(self.config.personality.sad_num_epochs);
+      let factor = f64::from(self.epoch.sad_for) / f64::from(config().personality.sad_num_epochs);
       if factor >= 2.0 {
         #[allow(clippy::cast_possible_truncation)]
         self.set_angry(factor as f32);
@@ -127,7 +128,7 @@ impl Automata {
       }
     } else if self.epoch.bored_for > 0 {
       self.set_bored();
-    } else if self.epoch.active_for >= self.config.personality.excited_num_epochs {
+    } else if self.epoch.active_for >= config().personality.excited_num_epochs {
       self.set_excited();
     } else if self.epoch.active_for >= 5 && self.has_support_network_for(5.0) {
       self.set_grateful();
@@ -142,9 +143,8 @@ impl Automata {
   }
 
   fn has_support_network_for(&self, factor: f32) -> bool {
-    let bond_factor = f64::from(self.config.personality.bond_encounters_factor);
+    let bond_factor = f64::from(config().personality.bond_encounters_factor);
     let total_encounters = f64::from(self.epoch.num_peers);
-    total_encounters > 0.0 && (bond_factor / total_encounters) >= factor.into()
+    total_encounters > 0.0 && bond_factor / total_encounters >= factor.into()
   }
-
 }

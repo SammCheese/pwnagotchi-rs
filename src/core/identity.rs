@@ -1,26 +1,32 @@
-use std::path;
-use crypto::{
-    digest::Digest,
+use std::{ path, process::exit };
+use crypto::{ digest::Digest };
+use nix::libc::EXIT_FAILURE;
+use rsa::{
+  pkcs1::{ DecodeRsaPrivateKey, EncodeRsaPublicKey },
+  rand_core::OsRng,
+  traits::SignatureScheme,
+  Pss,
+  RsaPrivateKey,
+  RsaPublicKey,
 };
-use rsa::{pkcs1::{DecodeRsaPrivateKey, EncodeRsaPublicKey}, rand_core::OsRng, traits::SignatureScheme, Pss, RsaPrivateKey, RsaPublicKey};
 use sha2::Sha256;
-use base64::{engine::general_purpose, Engine};
+use base64::{ engine::general_purpose, Engine };
 use std::process::Command;
 
-use crate::core::log::LOGGER;
+use crate::core::{ config::{ config }, log::LOGGER };
 
 const DEFAULT_PATH: &str = "/etc/pwnagotchi/";
 
 pub struct Identity {
   pub path: String,
-  pub priv_path: String,
-  pub priv_key: Option<RsaPrivateKey>,
-  pub pub_path: String,
-  pub pub_key: Option<RsaPublicKey>,
-  pub fingerprint_path: String,
+  priv_path: String,
+  priv_key: Option<RsaPrivateKey>,
+  pub_path: String,
+  pub_key: Option<RsaPublicKey>,
+  fingerprint_path: String,
 
   pubkey_pem_b64: Option<String>,
-  fingerprint: Option<String>,
+  pub fingerprint: Option<String>,
 }
 
 impl Default for Identity {
@@ -46,8 +52,8 @@ impl Default for Identity {
 }
 
 impl Identity {
-  pub fn new(path: &str) -> Self {
-    let path = path.to_string();
+  pub fn new() -> Self {
+    let path = config().identity.path.clone();
     let priv_path = format!("{path}id_rsa");
     let pub_path = format!("{priv_path}.pub");
     let fingerprint_path = format!("{path}fingerprint");
@@ -67,28 +73,28 @@ impl Identity {
   }
 
   pub fn initialize(&mut self) {
-    if !path::Path::new(&self.path).exists()
-      && let Err(e) = std::fs::create_dir_all(&self.path) {
-        LOGGER.log_error("IDENTITY", &format!("Failed to create identity directory: {e}"));
-        return;
-      }
+    if !path::Path::new(&self.path).exists() && let Err(e) = std::fs::create_dir_all(&self.path) {
+      LOGGER.log_error(
+        "IDENTITY",
+        &format!("Failed to create identity directory {:?}: {e}", &self.path)
+      );
+      exit(EXIT_FAILURE);
+    }
 
     loop {
       match self.try_load_keys() {
-        Ok(()) => break,
+        Ok(()) => {
+          break;
+        }
         Err(e) => {
           LOGGER.log_error("IDENTITY", &format!("Key load failed: {e}. Regenerating..."));
-          let _ = Command::new("pwngrid")
-              .arg("-generate")
-              .arg("-keys")
-              .arg(&self.path)
-              .status();
+          let _ = Command::new("pwngrid").arg("-generate").arg("-keys").arg(&self.path).status();
         }
       }
       if self.priv_key.is_some() && self.pub_key.is_some() {
         break;
       }
-  std::thread::sleep(std::time::Duration::from_secs(5));
+      std::thread::sleep(std::time::Duration::from_secs(5));
     }
   }
 
@@ -112,9 +118,9 @@ impl Identity {
     self.fingerprint = Some(hex::encode(hash));
 
     if let Some(fingerprint) = &self.fingerprint {
-        std::fs::write(&self.fingerprint_path, fingerprint)?;
+      std::fs::write(&self.fingerprint_path, fingerprint)?;
     } else {
-        return Err("Fingerprint not generated".into());
+      return Err("Fingerprint not generated".into());
     }
 
     Ok(())
@@ -124,15 +130,16 @@ impl Identity {
   ///
   /// # Errors
   /// Returns an error if the private key is not loaded or if the signing operation fails.
-    pub fn sign(&self, message: &str) -> Result<String, String> {
-      let key = self.priv_key.as_ref().ok_or("Private key not loaded")?;
-  
-      let pss = Pss::new_with_salt::<Sha256>(16);
-  
-      let signature = pss.sign(Some(&mut OsRng), key, message.as_bytes())
-          .map_err(|e| format!("Signing failed: {e}"))?;
-  
-      let signature_b64 = general_purpose::STANDARD.encode(&signature);
-      Ok(signature_b64)
-    }
+  pub fn sign(&self, message: &str) -> Result<String, String> {
+    let key = self.priv_key.as_ref().ok_or("Private key not loaded")?;
+
+    let pss = Pss::new_with_salt::<Sha256>(16);
+
+    let signature = pss
+      .sign(Some(&mut OsRng), key, message.as_bytes())
+      .map_err(|e| format!("Signing failed: {e}"))?;
+
+    let signature_b64 = general_purpose::STANDARD.encode(&signature);
+    Ok(signature_b64)
+  }
 }

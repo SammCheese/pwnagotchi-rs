@@ -1,51 +1,59 @@
-use std::{fs::OpenOptions, io::Write};
+use std::{ fs::OpenOptions, io::Write };
 
+use crate::core::config::config;
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum LogLevel {
-    Debug,
-    Info,
-    Warning,
-    Error,
-    Fatal,
+  Debug,
+  Info,
+  Warning,
+  Error,
+  Fatal,
 }
+
 pub struct Log {
-  file: String
+  file: String,
+}
+
+fn string_to_loglevel(level: &str) -> LogLevel {
+  match level.to_lowercase().as_str() {
+    "debug" => LogLevel::Debug,
+    "warning" => LogLevel::Warning,
+    "error" => LogLevel::Error,
+    "fatal" => LogLevel::Fatal,
+    _ => LogLevel::Info,
+  }
 }
 
 impl Log {
   pub fn new(file: &str) -> Self {
     Self {
-      file: file.to_string()
+      file: file.to_string(),
     }
   }
 
   fn log(&self, origin: &str, message: &str, level: &LogLevel) {
-    let level = match level {
-        LogLevel::Debug => "DEBUG",
-        LogLevel::Info => "INFO",
-        LogLevel::Warning => "WARNING",
-        LogLevel::Error => "ERROR",
-        LogLevel::Fatal => "FATAL",
+    let level_str = match level {
+      LogLevel::Debug => "DEBUG",
+      LogLevel::Info => "INFO",
+      LogLevel::Warning => "WARNING",
+      LogLevel::Error => "ERROR",
+      LogLevel::Fatal => "FATAL",
     };
-    let log_entry = format!(
-        "[{}] [{}]: [{}] {}\n",
-        chrono::Utc::now(),
-        origin,
-        level,
-        message
-    );
+    let config_level = string_to_loglevel(config().main.loglevel.as_str());
 
-    if let Ok(mut file) = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&self.file)
-    {
-        if let Err(e) = file.write_all(log_entry.as_bytes()) {
-            eprintln!("Failed to write to log file: {e}");
-        }
+    if level < &config_level {
+      return;
+    }
+
+    let log_entry = format!("[{}] [{}]: [{}] {}\n", chrono::Utc::now(), origin, level_str, message);
+
+    if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&self.file) {
+      if let Err(e) = file.write_all(log_entry.as_bytes()) {
+        eprintln!("Failed to write to log file: {e}");
+      }
     } else {
-        eprintln!("Failed to open log file: {}", &self.file);
+      eprintln!("Failed to open log file: {}", &self.file);
     }
   }
 
@@ -75,11 +83,10 @@ impl Default for Log {
   fn default() -> Self {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/root".into());
     Self {
-      file: format!("{home}/pwnagotchi.log")
+      file: format!("{home}/pwnagotchi.log"),
     }
   }
 }
-
 
 pub static LOGGER: std::sync::LazyLock<Log> = std::sync::LazyLock::new(|| {
   let home = std::env::var("HOME").unwrap_or_else(|_| "/root".into());

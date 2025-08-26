@@ -1,8 +1,5 @@
 use std::{fs, process::Command};
-
 use regex::Regex;
-
-
 
 pub fn iface_channels(name: &str) -> Vec<u8> {
    let phy_out = match Command::new("/sbin/iw")

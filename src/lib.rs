@@ -25,6 +25,8 @@
     pub mod automata;
     pub mod cli;
     pub mod models;
+    pub mod ui;
+    pub mod events;
 }
 
 mod traits {
