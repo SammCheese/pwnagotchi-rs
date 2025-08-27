@@ -13,6 +13,7 @@ pub struct MainConfig {
   pub handshakes_path: String,
   pub no_restart: bool,
   pub loglevel: String,
+  pub log_path: String,
 }
 
 impl Default for MainConfig {
@@ -29,6 +30,7 @@ impl Default for MainConfig {
       mon_stop_cmd: "/usr/bin/monstop".into(),
       no_restart: false,
       loglevel: "info".into(),
+      log_path: format!("{home}/logs/pwnagotchi.log"),
     }
   }
 }

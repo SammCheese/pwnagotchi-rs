@@ -27,6 +27,8 @@
     pub mod models;
     pub mod ui;
     pub mod events;
+    pub mod voice;
+    pub mod session;
 }
 
 mod traits {

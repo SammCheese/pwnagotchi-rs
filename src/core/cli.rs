@@ -56,8 +56,18 @@ pub async fn do_auto_mode(agent: Arc<Mutex<Agent>>) {
   }
 }
 
-pub async fn do_manual_mode(_agent: Arc<Mutex<Agent>>) {
+pub async fn do_manual_mode(agent: Arc<Mutex<Agent>>, skip: Option<bool>) {
   LOGGER.log_info("Pwnagotchi", "Starting in manual mode...");
+
+  {
+    let mut a = agent.lock().await;
+    a.mode = RunningMode::Manual;
+  }
+  {
+    let mut lastsession = agent.lock().await.lastsession.clone();
+    let a = agent.lock().await;
+    lastsession.parse(&a.view, skip);
+  }
 
   loop {
     sleep(Duration::from_secs(60)).await;

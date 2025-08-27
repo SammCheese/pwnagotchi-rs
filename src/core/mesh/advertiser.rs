@@ -12,6 +12,8 @@ pub struct AsyncAdvertiser {
   pub closest_peer: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+#[derive(Default)]
 pub struct Advertisement {
   pub name: String,
   pub version: String,
@@ -23,6 +25,7 @@ pub struct Advertisement {
   pub epoch: u32,
   pub policy: PersonalityConfig,
 }
+
 
 impl AsyncAdvertiser {
   pub fn new(agent: Agent, identity: Identity) -> Self {

@@ -22,7 +22,7 @@ use pwnagotchi_rs::core::{
   agent::Agent,
   cli,
   config::{ config, init_config },
-  events::{listener::EventListener},
+  events::listener::EventListener, log::LOGGER,
 };
 use tokio::{sync::Mutex};
 
@@ -47,6 +47,8 @@ struct Cli {
   show_version: bool,
   #[clap(long = "print-config", help = "Prints the configuration")]
   print_config: bool,
+  #[clap(long = "skip", help = "Skip parsing")]
+  skip: bool,
 }
 
 #[tokio::main]
@@ -70,11 +72,13 @@ async fn main() {
     exit(EXIT_SUCCESS);
   }
 
+  LOGGER.log_info("Pwnagotchi", "Starting!");
+
   let agent = Arc::new(Mutex::new(Agent::new()));
   let _e = EventListener::new(Arc::clone(&agent)).start_event_loop();
 
   if cli.manual {
-    cli::do_manual_mode(agent);
+    cli::do_manual_mode(agent, Some(cli.skip)).await;
   } else {
     cli::do_auto_mode(agent).await;
   }

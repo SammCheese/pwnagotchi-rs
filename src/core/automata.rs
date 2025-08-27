@@ -33,6 +33,14 @@ impl Automata {
     }
   }
 
+  pub fn set_starting(&self) {
+    self.view.on_starting();
+  }
+
+  pub const fn set_ready(&self) {
+    //plugins.on('ready')
+  }
+
   pub const fn set_starting_epoch(&mut self) {
     // TODO
   }

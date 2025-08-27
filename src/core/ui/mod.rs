@@ -1,5 +1,6 @@
 pub mod old;
 
-pub mod display;
+//pub mod display;
 pub mod state;
 pub mod view;
+pub mod components;

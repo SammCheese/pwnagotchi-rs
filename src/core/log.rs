@@ -81,14 +81,12 @@ impl Log {
 
 impl Default for Log {
   fn default() -> Self {
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/root".into());
     Self {
-      file: format!("{home}/pwnagotchi.log"),
+      file: config().main.log_path.clone(),
     }
   }
 }
 
 pub static LOGGER: std::sync::LazyLock<Log> = std::sync::LazyLock::new(|| {
-  let home = std::env::var("HOME").unwrap_or_else(|_| "/root".into());
-  Log::new(&format!("{home}/.pwnagotchi.log"))
+  Log::new(config().main.log_path.clone().as_str())
 });

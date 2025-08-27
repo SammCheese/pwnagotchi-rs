@@ -5,8 +5,12 @@ use std::thread::sleep;
 use serde::{ Deserialize, Serialize };
 
 use crate::core::config::config;
+use crate::core::mesh::advertiser::Advertisement;
 use crate::core::models::bettercap::Meta;
-use crate::core::ui::old::server::Server;
+use crate::core::session::LastSession;
+use crate::core::ui::old::web::server::Server;
+use crate::core::ui::state::StateValue;
+use crate::core::ui::view::View;
 use crate::core::{
   automata::Automata,
   bettercap::Bettercap,
@@ -24,13 +28,16 @@ pub enum RunningMode {
 }
 
 const WIFI_RECON: &str = "wifi.recon";
+const RECOVERY_FILE: &str = "/root/.pwnagotchi-recovery";
 
 pub struct Agent {
   pub bettercap: Bettercap,
   pub automata: Automata,
   identity: Identity,
+  pub view: View,
   pub server: Option<Server>,
   pub started_at: std::time::SystemTime,
+  pub lastsession: LastSession,
   pub current_channel: Option<u8>,
   pub total_aps: u32,
   pub aps_on_channel: u32,
@@ -92,8 +99,11 @@ pub struct AccessPoint {
 
 #[derive(Debug, Clone)]
 pub struct Peer {
-  pub mac: String,
-  pub last_channel: u8,
+  pub session_id: String,
+  pub channel: u8,
+  pub rssi: i32,
+  pub identity: String,
+  pub advertisement: Advertisement,
 }
 
 #[derive(Debug, Clone)]
@@ -115,6 +125,8 @@ impl Default for Agent {
       bettercap: Bettercap::default(),
       automata: Automata::default(),
       identity: Identity::default(),
+      view: View::default(),
+      lastsession: LastSession::default(),
       server: None,
       started_at: std::time::SystemTime::now(),
       current_channel: None,
@@ -138,6 +150,8 @@ impl Agent {
       bettercap,
       automata: Automata::new(),
       identity: Identity::new(),
+      view: View::new(),
+      lastsession: LastSession::new(),
       server: None,
       started_at: std::time::SystemTime::now(),
       current_channel: None,
@@ -157,7 +171,7 @@ impl Agent {
   }
 
   fn initialize(&mut self) {
-    LOGGER.log_debug("Agent", "Initializing agent...");
+    LOGGER.log_info("Agent", "Initializing Agent");
 
     let handshakes_path = &config().main.handshakes_path;
     if fs::metadata(handshakes_path).is_err() && let Err(e) = fs::create_dir_all(handshakes_path) {
@@ -285,7 +299,7 @@ impl Agent {
       self.start_module(WIFI_RECON).await;
     }
 
-    // Advertising logic here
+    //self.advertiser.start_advertising()
   }
 
   #[allow(clippy::future_not_send)]
@@ -305,11 +319,11 @@ impl Agent {
   pub async fn start(&mut self) {
     self.wait_for_bettercap().await;
     self.setup_events().await;
-    //self.set_starting();
+    self.automata.set_starting();
     self.start_monitor_mode().await;
     self.automata.next_epoch();
     //self.start_session_fetcher();
-    //self.set_ready();
+    self.automata.set_ready();
   }
 
   #[allow(clippy::future_not_send)]
@@ -375,6 +389,7 @@ impl Agent {
       recon_time *= recon_multiplier;
     }
 
+    self.view.set("channel", StateValue::Text("*".into()));
     LOGGER.log_debug("RECON", "Starting Recon");
 
     if channels.is_empty() {
@@ -414,10 +429,11 @@ impl Agent {
     }
 
     if config().personality.associate && self.should_interact(&ap.mac) {
-      LOGGER.log_debug(
+      self.view.on_assoc(ap);
+      LOGGER.log_info(
         "AGENT",
         &format!(
-          "Sending association frame to {} ({}) on channel {} ({} clients), {} dBm",
+          "sending association frame to {} ({}) on channel {} ({} clients), {} dBm",
           ap.mac,
           ap.hostname,
           ap.channel,
@@ -444,6 +460,7 @@ impl Agent {
         LOGGER.log_debug("AGENT", &format!("Throttling association for {throttle} seconds"));
         sleep(Duration::from_secs_f32(throttle));
       }
+      self.view.on_normal();
     }
   }
 
@@ -458,10 +475,11 @@ impl Agent {
     }
 
     if config().personality.deauth && self.should_interact(&sta.mac) {
+      self.view.on_deauth(sta);
       LOGGER.log_debug(
         "AGENT",
         &format!(
-          "Sending deauth frame to {} ({}) on channel {} ({} clients), {} dBm",
+          "deauthing {} ({}) on channel {} ({} clients), {} dBm",
           ap.mac,
           ap.hostname,
           ap.channel,
@@ -489,7 +507,16 @@ impl Agent {
         LOGGER.log_debug("AGENT", &format!("Throttling deauth for {throttle} seconds"));
         sleep(Duration::from_secs_f32(throttle));
       }
+      self.view.on_normal();
     }
+  }
+
+  fn restart(&mut self) {
+    // TODO
+  }
+
+  fn reboot(&mut self) {
+    // TODO
   }
 
   fn has_handshake(&self, bssid: &str) -> bool {
@@ -629,6 +656,7 @@ impl Agent {
     None
   }
 
+
   pub async fn set_channel(&mut self, channel: u8) {
     if self.automata.is_stale() {
       LOGGER.log_debug("AGENT", &format!("Recon is stale, skipping channel switch to {channel}"));
@@ -655,6 +683,7 @@ impl Agent {
         Ok(()) => {
           self.current_channel = Some(channel);
           self.automata.epoch.track("hop", Some(1));
+          self.view.set("channel", StateValue::Number(channel.into()));
           LOGGER.log_info("AGENT", &format!("Switched to channel {channel}"));
         }
         Err(e) => {
