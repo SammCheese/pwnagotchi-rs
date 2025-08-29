@@ -3,29 +3,30 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
+use crate::core::ui::components::Widget;
 use crate::core::ui::view::FaceType;
 
 type Listener<T> = Box<dyn Fn(T, T) + Send + Sync>;
 
+
 #[derive(Clone, PartialEq, Eq)]
 pub enum StateValue {
+    None,
     Face(FaceType),
     Text(String),
     Number(u64),
     Bool(bool),
-    Fn(fn()),
 }
 
-pub struct Element {
-    pub value: StateValue,
-}
+pub type Element = HashMap<String, Arc<dyn Widget>>;
 
 #[derive(Clone)]
 pub struct State {
-    elements: Arc<Mutex<HashMap<String, StateValue>>>,
-    listeners: Arc<Mutex<HashMap<String, Listener<StateValue>>>>,
-    changes: Arc<Mutex<HashMap<String, bool>>>,
+    pub elements: Arc<Mutex<Element>>,
+    pub listeners: Arc<Mutex<HashMap<String, Listener<StateValue>>>>,
+    pub changes: Arc<Mutex<HashMap<String, bool>>>,
 }
+
 
 impl Default for State {
     fn default() -> Self {
@@ -43,7 +44,7 @@ impl State {
         }
     }
 
-    pub fn add_element(&self, key: &str, elem: StateValue) {
+    pub fn add_element(&self, key: &str, elem: Arc<dyn Widget>) {
         self
             .elements
             .lock()
@@ -88,7 +89,7 @@ impl State {
             .insert(key.to_string(), Box::new(cb));
     }
 
-    pub fn items(&self) -> HashMap<String, StateValue> {
+    pub fn items(&self) -> Element {
         self
             .elements
             .lock()
@@ -96,30 +97,12 @@ impl State {
             .clone()
     }
 
-    pub fn get(&self, key: &str) -> Option<StateValue> {
+    pub fn get(&self, key: &str) -> Option<Arc<dyn Widget>> {
         self
             .elements
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .get(key).cloned()
-    }
-
-    /// Get and convert the stored value into a different return type using `Into`.
-    /// Example: let n: Option<u64> = `state.get_into("count`");
-    pub fn get_into<R>(&self, key: &str) -> Option<R>
-    where
-        StateValue: Into<R>,
-    {
-        self.get(key).map(Into::into)
-    }
-
-    /// Get and transform the stored value with a custom mapping function.
-    /// The value is cloned before mapping, keeping this API fully synchronous.
-    pub fn get_map<R, F>(&self, key: &str, f: F) -> Option<R>
-    where
-        F: FnOnce(StateValue) -> R,
-    {
-        self.get(key).map(f)
     }
 
     pub fn reset(&self) {
@@ -150,15 +133,15 @@ impl State {
             .is_empty()
     }
 
-    pub fn set(&self, key: &str, value: StateValue) {
+    pub fn set(&self, key: &str, value: &StateValue) {
         let mut elements = self
             .elements
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(elem) = elements.get_mut(key) {
-            let prev = elem.clone();
-            if prev != value {
-                *elem = value.clone();
+            let widget = Arc::get_mut(elem).expect("Widget Arc should be uniquely owned for mutation");
+            let prev_value = widget.get_value();
+            if prev_value != *value {
                 self
                     .changes
                     .lock()
@@ -171,7 +154,7 @@ impl State {
                     .unwrap_or_else(std::sync::PoisonError::into_inner)
                     .get(key)
                 {
-                    let _ = catch_unwind(AssertUnwindSafe(|| (listener)(prev, value)));
+                    let _ = catch_unwind(AssertUnwindSafe(|| (listener)(prev_value, value.clone())));
                 }
             }
         }

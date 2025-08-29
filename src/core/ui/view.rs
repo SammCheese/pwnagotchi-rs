@@ -1,15 +1,27 @@
-use std::{ collections::HashMap, thread::sleep, time::Duration };
+use std::{
+  collections::HashMap,
+  f64::consts::E,
+  sync::{ Arc, Mutex },
+  thread::sleep,
+  time::Duration,
+};
 
-use image::ImageBuffer;
-use imageproc::{definitions::Image, drawing::Canvas};
+use ab_glyph::{ Font, FontRef };
+use image::{ Rgba, RgbaImage };
 use rand::Rng;
 
 use crate::core::{
-  agent::{ AccessPoint, Peer, Station },
+  agent::{ AccessPoint, Agent, Peer, Station },
   config::config,
+  log::LOGGER,
   session::LastSession,
-  ui::state::{ State, StateValue },
-  utils::{ total_unique_handshakes },
+  ui::{
+    components::{ LabeledValue, Line, TextWidget, Widget },
+    fonts::{ FontType, FONTS },
+    old::{ hw::base::{ get_display_from_config, DisplayImpl, DisplayTrait }, web::frame },
+    state::{ Element, State, StateValue },
+  },
+  utils::{ face_to_string, total_unique_handshakes },
   voice::Voice,
 };
 
@@ -42,18 +54,22 @@ pub enum FaceType {
   Upload2,
 }
 
-const WHITE: i32 = 0x00;
-const BLACK: i32 = 0xff;
+const WHITE: Rgba<u8> = Rgba([255, 255, 255, 255]);
+const BLACK: Rgba<u8> = Rgba([0, 0, 0, 255]);
 
 pub struct View {
   pub voice: Voice,
   pub state: State,
+  pub display: Box<dyn DisplayTrait>,
+  pub agent: Option<Arc<Agent>>,
   pub inverted: bool,
-  pub background_color: i32,
-  pub foreground_color: i32,
+  pub background_color: Rgba<u8>,
+  pub foreground_color: Rgba<u8>,
   pub frozen: bool,
   pub ignore_changes: Vec<&'static str>,
-  pub render_callbacks: Vec<fn()>,
+  pub render_callbacks: Vec<fn(&RgbaImage)>,
+  pub width: u32,
+  pub height: u32,
 }
 
 impl Default for View {
@@ -64,32 +80,193 @@ impl Default for View {
     Self {
       voice: Voice::new(),
       state: State::new(),
+      display: get_display_from_config(),
+      agent: None,
       inverted,
       background_color,
       foreground_color,
       frozen: false,
       ignore_changes: Vec::new(),
       render_callbacks: Vec::new(),
+      width: 200,
+      height: 200,
     }
   }
 }
 
 impl View {
-  pub fn new() -> Self {
+  pub fn new(display: Box<dyn DisplayTrait>) -> Self {
     let inverted = config().ui.inverted;
     let background_color = if inverted { BLACK } else { WHITE };
     let foreground_color = if inverted { WHITE } else { BLACK };
-    let state = State::new();
-    Self {
+
+    let mut view = Self {
+      display,
       voice: Voice::new(),
-      state,
+      state: State::new(),
+      agent: None,
       inverted,
       background_color,
       foreground_color,
       frozen: false,
       ignore_changes: Vec::new(),
       render_callbacks: Vec::new(),
+      width: 200,
+      height: 200,
+    };
+    view.initialize();
+    view
+  }
+
+  fn initialize(&mut self) {
+    self.populate_state();
+    if config().ui.fps > 0.0 {
+      self.start_render_loop();
+    } else {
+      self.ignore_changes.push("face");
+      LOGGER.log_warning("UI", "FPS set to 0, Display only updates for major changes");
     }
+  }
+
+  fn start_render_loop(&self) {
+    let view = Arc::new(self.clone_for_render_loop());
+    tokio::spawn(async move {
+      let delay = 1.0 / f64::from(config().ui.fps);
+      loop {
+        view.update(None, None);
+        tokio::time::sleep(Duration::from_secs_f64(delay)).await;
+      }
+    });
+  }
+
+  // Helper to clone only the necessary fields for rendering
+  fn clone_for_render_loop(&self) -> Self {
+    Self {
+      voice: self.voice.clone(),
+      state: self.state.clone(),
+      agent: self.agent.clone(),
+      display: get_display_from_config(),
+      inverted: self.inverted,
+      background_color: self.background_color,
+      foreground_color: self.foreground_color,
+      frozen: self.frozen,
+      ignore_changes: self.ignore_changes.clone(),
+      render_callbacks: self.render_callbacks.clone(),
+      width: self.width,
+      height: self.height,
+    }
+  }
+
+  fn populate_state(&mut self) {
+    let layout = self.display.layout();
+    let font = &FONTS.lock()
+      .unwrap()
+      .fonts.get(&FontType::Regular)
+      .cloned()
+      .unwrap_or_else(|| {
+        Arc::new(FONTS.lock().unwrap().get_font_arc("DejaVu Sans Mono").unwrap())
+      });
+
+    let channel = LabeledValue::new(
+      layout.channel,
+      "CH".to_string(),
+      "-".to_string(),
+      font.clone(),
+      image::Rgba(self.foreground_color.0),
+      10.0
+    );
+    let aps = LabeledValue::new(
+      layout.aps,
+      "APS".to_string(),
+      "0 (00)".to_string(),
+      font.clone(),
+      image::Rgba(self.foreground_color.0),
+      10.0
+    );
+    let uptime = LabeledValue::new(
+      layout.uptime,
+      "UP".to_string(),
+      "00:00:00".to_string(),
+      font.clone(),
+      image::Rgba(self.foreground_color.0),
+      10.0
+    );
+    let line1 = Line::new(layout.line1, image::Rgba(self.foreground_color.0), 2);
+    let line2 = Line::new(layout.line2, image::Rgba(self.foreground_color.0), 2);
+    let face = TextWidget::new(
+      layout.face,
+      face_to_string(FaceType::Awake),
+      font.clone(),
+      image::Rgba(self.foreground_color.0),
+      40.0
+    );
+    let friend_name = TextWidget::new(
+      layout.friend_name,
+      "",
+      font.clone(),
+      image::Rgba(self.foreground_color.0),
+      10.0
+    );
+    let name = TextWidget::new(
+      layout.name,
+      config().main.name.clone(),
+      font.clone(),
+      image::Rgba(self.foreground_color.0),
+      10.0
+    );
+    let status = TextWidget::new(
+      layout.status.pos,
+      self.voice.on_normal(),
+      font.clone(),
+      image::Rgba(self.foreground_color.0),
+      10.0
+    );
+    let shakes = LabeledValue::new(
+      layout.shakes,
+      "PWND".to_string(),
+      "0 (00)".to_string(),
+      font.clone(),
+      image::Rgba(self.foreground_color.0),
+      10.0
+    );
+    let mode = TextWidget::new(
+      layout.mode,
+      "AUTO",
+      font.clone(),
+      image::Rgba(self.foreground_color.0),
+      10.0
+    );
+
+    let mut handle = self.state.elements.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    handle.insert("channel".to_owned(), Arc::new(channel));
+    handle.insert("aps".to_owned(), Arc::new(aps));
+    handle.insert("line1".to_owned(), Arc::new(line1));
+    handle.insert("line2".to_owned(), Arc::new(line2));
+    handle.insert("uptime".to_owned(), Arc::new(uptime));
+    handle.insert("face".to_owned(), Arc::new(face));
+    handle.insert("friend_name".to_owned(), Arc::new(friend_name));
+    handle.insert("name".to_owned(), Arc::new(name));
+    handle.insert("status".to_owned(), Arc::new(status));
+    handle.insert("shakes".to_owned(), Arc::new(shakes));
+    handle.insert("mode".to_owned(), Arc::new(mode));
+  }
+
+  pub fn set_agent(&mut self, agent: Arc<Agent>) {
+    self.agent = Some(agent);
+  }
+
+  pub fn has_element(&self, key: &str) -> bool {
+    match self.state.elements.lock() {
+      Ok(state) => state.contains_key(key),
+      Err(e) => {
+        eprintln!("Failed to lock state elements: {e}");
+        false
+      }
+    }
+  }
+
+  pub fn add_element(&self, key: &str, elem: Arc<dyn Widget>) {
+    self.state.add_element(key, elem);
   }
 
   pub fn on_state_change<F>(&self, key: &str, callback: F)
@@ -98,34 +275,26 @@ impl View {
     self.state.add_listener(key, callback);
   }
 
-  pub fn on_render(&mut self, callback: Option<fn()>) {
-    if let Some(cb) = callback
-      && !self.render_callbacks.contains(&cb) {
-        self.render_callbacks.push(cb);
-      }
-  }
-
-  fn refresh_handler(&self) {
-    let delay = 1.0 / f64::from(config().ui.fps);
-    loop {
-      self.update(None, None);
-      sleep(Duration::from_secs_f64(delay));
+  pub fn on_render(&mut self, callback: Option<fn(&RgbaImage)>) {
+    if let Some(cb) = callback && !self.render_callbacks.contains(&cb) {
+      self.render_callbacks.push(cb);
     }
   }
 
   pub fn on_starting(&self) {
     self.set(
       "status",
-      StateValue::Text(self.voice.on_starting() + &format!("\n(v{}", env!("CARGO_PKG_VERSION")))
+
+      &StateValue::Text(self.voice.on_starting() + &format!("\n(v{}", env!("CARGO_PKG_VERSION")))
     );
-    self.set("face", StateValue::Face(FaceType::Awake));
+    self.set("face", &StateValue::Face(FaceType::Awake));
   }
 
   pub fn on_manual_mode(&self, last_session: &LastSession) {
-    self.set("mode", StateValue::Text("MANU".into()));
+    self.set("mode", &StateValue::Text("MANU".into()));
     self.set(
       "face",
-      StateValue::Face(
+      &StateValue::Face(
         if last_session.epochs > 3 && last_session.handshakes == 0 {
           FaceType::Sad
         } else {
@@ -133,14 +302,14 @@ impl View {
         }
       )
     );
-    self.set("status", StateValue::Text(self.voice.on_last_session_data(last_session)));
-    self.set("epoch", StateValue::Text(last_session.epochs.to_string()));
-    self.set("uptime", StateValue::Text(last_session.duration.to_string()));
-    self.set("channel", StateValue::Text("-".into()));
-    self.set("aps", StateValue::Text(last_session.associated.to_string()));
+    self.set("status", &StateValue::Text(self.voice.on_last_session_data(last_session)));
+    self.set("epoch", &StateValue::Text(last_session.epochs.to_string()));
+    self.set("uptime", &StateValue::Text(last_session.duration.to_string()));
+    self.set("channel", &StateValue::Text("-".into()));
+    self.set("aps", &StateValue::Text(last_session.associated.to_string()));
     self.set(
       "shakes",
-      StateValue::Text(
+      &StateValue::Text(
         format!(
           "{} ({})",
           total_unique_handshakes(&config().main.handshakes_path),
@@ -153,14 +322,14 @@ impl View {
   }
 
   pub fn on_keys_generation(&self) {
-    self.set("face", StateValue::Face(FaceType::Awake));
-    self.set("status", StateValue::Text(self.voice.on_keys_generation()));
+    self.set("face", &StateValue::Face(FaceType::Awake));
+    self.set("status", &StateValue::Text(self.voice.on_keys_generation()));
     self.update(None, None);
   }
 
   pub fn on_normal(&self) {
-    self.set("face", StateValue::Face(FaceType::Awake));
-    self.set("status", StateValue::Text(self.voice.on_normal()));
+    self.set("face", &StateValue::Face(FaceType::Awake));
+    self.set("status", &StateValue::Text(self.voice.on_normal()));
     self.update(None, None);
   }
 
@@ -169,164 +338,136 @@ impl View {
   }
 
   pub fn on_lost_peer(&self, _peer: &Peer) {
-    self.set("face", StateValue::Face(FaceType::Lonely));
+    self.set("face", &StateValue::Face(FaceType::Lonely));
     // self.set("status", StateValue::Text(self.voice.on_lost_peer(peer)));
   }
 
   pub fn on_free_channel(&self, channel: u8) {
-    self.set("face", StateValue::Face(FaceType::Smart));
-    self.set("status", StateValue::Text(self.voice.on_free_channel(channel)));
+    self.set("face", &StateValue::Face(FaceType::Smart));
+    self.set("status", &StateValue::Text(self.voice.on_free_channel(channel)));
     self.update(None, None);
   }
 
   pub fn on_reading_logs(&self, lines: u64) {
-    self.set("face", StateValue::Face(FaceType::Smart));
-    self.set("status", StateValue::Text(self.voice.on_reading_logs(lines)));
+    self.set("face", &StateValue::Face(FaceType::Smart));
+    self.set("status", &StateValue::Text(self.voice.on_reading_logs(lines)));
     self.update(None, None);
   }
 
   pub fn on_shutdown(&mut self) {
-    self.set("face", StateValue::Face(FaceType::Sleep));
-    self.set("status", StateValue::Text(self.voice.on_shutdown()));
+    self.set("face", &StateValue::Face(FaceType::Sleep));
+    self.set("status", &StateValue::Text(self.voice.on_shutdown()));
     self.update(None, None);
     self.frozen = true;
   }
 
   pub fn on_bored(&self) {
-    self.set("face", StateValue::Face(FaceType::Bored));
-    self.set("status", StateValue::Text(self.voice.on_bored()));
+    self.set("face", &StateValue::Face(FaceType::Bored));
+    self.set("status", &StateValue::Text(self.voice.on_bored()));
     self.update(None, None);
   }
 
   pub fn on_sad(&self) {
-    self.set("face", StateValue::Face(FaceType::Sad));
-    self.set("status", StateValue::Text(self.voice.on_sad()));
+    self.set("face", &StateValue::Face(FaceType::Sad));
+    self.set("status", &StateValue::Text(self.voice.on_sad()));
     self.update(None, None);
   }
 
   pub fn on_angry(&self) {
-    self.set("face", StateValue::Face(FaceType::Angry));
-    self.set("status", StateValue::Text(self.voice.on_angry()));
+    self.set("face", &StateValue::Face(FaceType::Angry));
+    self.set("status", &StateValue::Text(self.voice.on_angry()));
     self.update(None, None);
   }
 
   pub fn on_motivated(&self) {
-    self.set("face", StateValue::Face(FaceType::Motivated));
-    self.set("status", StateValue::Text(self.voice.on_motivated()));
+    self.set("face", &StateValue::Face(FaceType::Motivated));
+    self.set("status", &StateValue::Text(self.voice.on_motivated()));
     self.update(None, None);
   }
 
   pub fn on_demotivated(&self) {
-    self.set("face", StateValue::Face(FaceType::Demotivated));
-    self.set("status", StateValue::Text(self.voice.on_demotivated()));
+    self.set("face", &StateValue::Face(FaceType::Demotivated));
+    self.set("status", &StateValue::Text(self.voice.on_demotivated()));
     self.update(None, None);
   }
 
   pub fn on_excited(&self) {
-    self.set("face", StateValue::Face(FaceType::Excited));
-    self.set("status", StateValue::Text(self.voice.on_excited()));
+    self.set("face", &StateValue::Face(FaceType::Excited));
+    self.set("status", &StateValue::Text(self.voice.on_excited()));
     self.update(None, None);
   }
 
   pub fn on_assoc(&self, ap: &AccessPoint) {
-    self.set("face", StateValue::Face(FaceType::Intense));
-    self.set("status", StateValue::Text(self.voice.on_assoc(ap.clone())));
+    self.set("face", &StateValue::Face(FaceType::Intense));
+    self.set("status", &StateValue::Text(self.voice.on_assoc(ap.clone())));
     self.update(None, None);
   }
 
   pub fn on_deauth(&self, who: &Station) {
-    self.set("face", StateValue::Face(FaceType::Angry));
-    self.set("status", StateValue::Text(self.voice.on_deauth(who)));
+    self.set("face", &StateValue::Face(FaceType::Angry));
+    self.set("status", &StateValue::Text(self.voice.on_deauth(who)));
     self.update(None, None);
   }
 
   pub fn on_miss(&self, who: &Station) {
-    self.set("face", StateValue::Face(FaceType::Sad));
-    self.set("status", StateValue::Text(self.voice.on_miss(&who.mac)));
+    self.set("face", &StateValue::Face(FaceType::Sad));
+    self.set("status", &StateValue::Text(self.voice.on_miss(&who.mac)));
     self.update(None, None);
   }
 
   pub fn on_grateful(&self) {
-    self.set("face", StateValue::Face(FaceType::Grateful));
-    self.set("status", StateValue::Text(self.voice.on_grateful()));
+    self.set("face", &StateValue::Face(FaceType::Grateful));
+    self.set("status", &StateValue::Text(self.voice.on_grateful()));
     self.update(None, None);
   }
 
   pub fn on_lonely(&self) {
-    self.set("face", StateValue::Face(FaceType::Lonely));
-    self.set("status", StateValue::Text(self.voice.on_lonely()));
+    self.set("face", &StateValue::Face(FaceType::Lonely));
+    self.set("status", &StateValue::Text(self.voice.on_lonely()));
     self.update(None, None);
   }
 
   pub fn on_handshakes(&self, count: u32) {
-    self.set("face", StateValue::Face(FaceType::Happy));
-    self.set("status", StateValue::Text(self.voice.on_handshakes(count)));
+    self.set("face", &StateValue::Face(FaceType::Happy));
+    self.set("status", &StateValue::Text(self.voice.on_handshakes(count)));
     self.update(None, None);
   }
 
   pub fn on_unread_messages(&self, count: u32) {
-    self.set("face", StateValue::Face(FaceType::Excited));
-    self.set("status", StateValue::Text(self.voice.on_unread_messages(count)));
+    self.set("face", &StateValue::Face(FaceType::Excited));
+    self.set("status", &StateValue::Text(self.voice.on_unread_messages(count)));
     self.update(None, None);
     sleep(Duration::from_millis(100));
   }
 
   pub fn on_uploading(&self, to: &str) {
     let faces = [FaceType::Upload, FaceType::Upload1, FaceType::Upload2];
-    self.set("face", StateValue::Face(faces[rand::rng().random_range(0..faces.len())]));
-    self.set("status", StateValue::Text(self.voice.on_uploading(to)));
+    self.set("face", &StateValue::Face(faces[rand::rng().random_range(0..faces.len())]));
+    self.set("status", &StateValue::Text(self.voice.on_uploading(to)));
     self.update(Some(true), None);
   }
 
   pub fn on_rebooting(&self) {
-    self.set("face", StateValue::Face(FaceType::Broken));
-    self.set("status", StateValue::Text(self.voice.on_rebooting()));
+    self.set("face", &StateValue::Face(FaceType::Broken));
+    self.set("status", &StateValue::Text(self.voice.on_rebooting()));
     self.update(None, None);
   }
 
   pub fn on_custom(&self, text: &str) {
-    self.set("face", StateValue::Face(FaceType::Debug));
-    self.set("status", StateValue::Text(self.voice.custom(text)));
+    self.set("face", &StateValue::Face(FaceType::Debug));
+    self.set("status", &StateValue::Text(self.voice.custom(text)));
     self.update(None, None);
   }
 
-  pub fn face_to_string(face: FaceType) -> String {
-    let faces = &config().faces;
-    let face_str = match face {
-      FaceType::LookR => &faces.look_r,
-      FaceType::LookL => &faces.look_l,
-      FaceType::LookRHappy => &faces.look_r_happy,
-      FaceType::LookLHappy => &faces.look_l_happy,
-      FaceType::Sleep => &faces.sleep,
-      FaceType::Sleep2 => &faces.sleep2,
-      FaceType::Awake => &faces.awake,
-      FaceType::Bored => &faces.bored,
-      FaceType::Intense => &faces.intense,
-      FaceType::Cool => &faces.cool,
-      FaceType::Happy => &faces.happy,
-      FaceType::Grateful => &faces.grateful,
-      FaceType::Excited => &faces.excited,
-      FaceType::Motivated => &faces.motivated,
-      FaceType::Demotivated => &faces.demotivated,
-      FaceType::Smart => &faces.smart,
-      FaceType::Lonely => &faces.lonely,
-      FaceType::Sad => &faces.sad,
-      FaceType::Angry => &faces.angry,
-      FaceType::Friend => &faces.friend,
-      FaceType::Broken => &faces.broken,
-      FaceType::Debug => &faces.debug,
-      FaceType::Upload => &faces.upload,
-      FaceType::Upload1 => &faces.upload1,
-      FaceType::Upload2 => &faces.upload2,
-    };
-    face_str.to_string()
-  }
-
-  pub fn get(&self, key: &str) -> Option<StateValue> {
+  pub fn get(&self, key: &str) -> Option<Arc<dyn Widget>> {
     self.state.get(key)
   }
 
-  pub fn set(&self, key: &str, value: StateValue) {
+  pub fn set(&self, key: &str, value: &StateValue) {
+    let value = match value {
+      StateValue::Face(face) => { &StateValue::Text(face_to_string(*face)) }
+      _ => value,
+    };
     self.state.set(key, value);
   }
 
@@ -348,11 +489,8 @@ impl View {
     self.state
       .get("face")
       .filter(|face| {
-        let face = match face {
-          StateValue::Face(f) => *f,
-          _ => {
-            return false;
-          }
+        let StateValue::Face(face) = face.get_value() else {
+          return false;
         };
         special_moods.contains(&face)
       })
@@ -368,28 +506,28 @@ impl View {
       if was_normal || step > 5 {
         if sleeping {
           if secs > 1.0 {
-            self.set("face", StateValue::Face(FaceType::Sleep));
+            self.set("face", &StateValue::Face(FaceType::Sleep));
             #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
-            self.set("status", StateValue::Text(self.voice.on_napping(secs as u64)));
+            self.set("status", &StateValue::Text(self.voice.on_napping(secs as u64)));
           } else {
-            self.set("face", StateValue::Face(FaceType::Sleep2));
-            self.set("status", StateValue::Text(self.voice.on_awakening()));
+            self.set("face", &StateValue::Face(FaceType::Sleep2));
+            self.set("status", &StateValue::Text(self.voice.on_awakening()));
           }
         } else {
           #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
-          self.set("status", StateValue::Text(self.voice.on_waiting(secs as u64)));
+          self.set("status", &StateValue::Text(self.voice.on_waiting(secs as u64)));
 
           let good_mood = true; //self.agent.emotion.in_good_mood();
 
           if step % 2 == 0 {
             self.set(
               "face",
-              StateValue::Face(if good_mood { FaceType::LookRHappy } else { FaceType::LookR })
+              &StateValue::Face(if good_mood { FaceType::LookRHappy } else { FaceType::LookR })
             );
           } else {
             self.set(
               "face",
-              StateValue::Face(if good_mood { FaceType::LookLHappy } else { FaceType::LookL })
+              &StateValue::Face(if good_mood { FaceType::LookLHappy } else { FaceType::LookL })
             );
           }
         }
@@ -405,7 +543,7 @@ impl View {
     let force = force.unwrap_or(false);
     if let Some(new_data) = new_data {
       for (key, value) in new_data {
-        self.set(&key, value);
+        self.set(&key, &value);
       }
     }
 
@@ -413,16 +551,23 @@ impl View {
       return;
     }
 
-    let state = self.state.clone();
+    let state = &self.state;
     let changes = state.changes(&self.ignore_changes);
 
     if force || !changes.is_empty() {
-      //let canvas = ImageBuffer::new(200, 200);
-      //let drawer = canvas.draw();
+      let mut canvas = RgbaImage::new(self.width, self.height);
+
+      for (_key, widget) in self.state.items() {
+        widget.draw(&mut canvas);
+      }
+
+      frame::update_frame(&canvas);
+
+      for cb in &self.render_callbacks {
+        cb(&canvas);
+      }
 
       self.state.reset();
     }
-
-    // TODO
   }
 }

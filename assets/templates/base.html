@@ -38,22 +38,16 @@
     </script>
     {% endif %}
 
-    {% set navigation = [
-        ( '/', 'home', 'eye', 'Home' ),
-        ( '/inbox', 'inbox', 'bars', 'Inbox' ),
-        ( '/inbox/new', 'new', 'mail', 'New' ),
-        ( '/inbox/profile', 'profile', 'info', 'Profile' ),
-        ( '/inbox/peers', 'peers', 'user', 'Peers' ),
-        ( '/plugins', 'plugins', 'grid', 'Plugins' ),
-    ] %}
-    {% set active_page = active_page|default('inbox') %}
+    {% set_global navigation = navigations %}
+
+    {% set_global active_page = active_page | default(value="inbox") %}
 
     <div data-role="footer">
         <div data-role="navbar" data-iconpos="left">
             <ul>
-                {% for href, id, icon, caption in navigation %}
+                {% for item in navigation %}
                     <li class="navitem">
-                       <a href="{{ href }}" id="{{ id }}" data-icon="{{ icon }}" class="{{ 'ui-btn-active' if active_page == id }}">{{ caption }}</a>
+                       <a href="{{ item.url }}" id="{{ item.id }}" data-icon="{{ item.icon }}" class="{% if active_page == item.id %}ui-btn-active{% endif %}">{{ item.label }}</a>
                     </li>
                 {% endfor %}
             </ul>

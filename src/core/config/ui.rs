@@ -54,7 +54,7 @@ impl Default for UIConfig {
       display: UIDisplayConfig {
         enabled: false,
         rotation: 180,
-        r#type: "waveshare_4".into(),
+        r#type: "waveshare_v4".into(),
       },
       font: UIFontConfig {
         size_offset: 0,

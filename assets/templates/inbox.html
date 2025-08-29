@@ -17,7 +17,7 @@ $(function() {
 <ul class="inbox" data-role="listview" data-filter="true" data-filter-placeholder="Search inbox..." data-inset="true">
     {% for message in inbox.messages %}
     <li class="message">
-        <a href="/inbox/{{ message.id }}" class="{{ 'unread' if not message.seen_at else 'read' }}">
+        <a href="/inbox/{{ message.id }}" class="{% if not message.seen_at %}unread{% else %}read{% endif %}">
             <h2>{{ message.sender_name }}@{{ message.sender }}</h2>
             <p>
                 Received

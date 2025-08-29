@@ -1,4 +1,4 @@
-use std::{ fs::OpenOptions, io::Write };
+use std::{ fs::{self, OpenOptions}, io::Write };
 
 use crate::core::config::config;
 
@@ -27,9 +27,20 @@ fn string_to_loglevel(level: &str) -> LogLevel {
 
 impl Log {
   pub fn new(file: &str) -> Self {
-    Self {
+    let logfile = Self {
       file: file.to_string(),
-    }
+    };
+    logfile.initialize();
+    logfile
+  }
+
+  fn initialize(&self) {
+    let path = std::path::Path::new(&self.file);
+    if let Some(parent) = path.parent()
+      && !parent.exists()
+        && let Err(e) = fs::create_dir_all(parent) {
+          eprintln!("Failed to create log directory: {e}");
+        }
   }
 
   fn log(&self, origin: &str, message: &str, level: &LogLevel) {
@@ -88,5 +99,7 @@ impl Default for Log {
 }
 
 pub static LOGGER: std::sync::LazyLock<Log> = std::sync::LazyLock::new(|| {
-  Log::new(config().main.log_path.clone().as_str())
+  let log = Log::new(config().main.log_path.clone().as_str());
+  log.log_info("", "#=========== STARTED ===========#");
+  log
 });

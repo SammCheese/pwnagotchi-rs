@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::sync::Arc;
 use std::{ collections::HashMap, fs, time::Duration };
 
 use std::thread::sleep;
@@ -8,6 +9,7 @@ use crate::core::config::config;
 use crate::core::mesh::advertiser::Advertisement;
 use crate::core::models::bettercap::Meta;
 use crate::core::session::LastSession;
+use crate::core::ui::old::hw::base::get_display_from_config;
 use crate::core::ui::old::web::server::Server;
 use crate::core::ui::state::StateValue;
 use crate::core::ui::view::View;
@@ -35,7 +37,7 @@ pub struct Agent {
   pub automata: Automata,
   identity: Identity,
   pub view: View,
-  pub server: Option<Server>,
+  pub server: Option<Arc<Server>>,
   pub started_at: std::time::SystemTime,
   pub lastsession: LastSession,
   pub current_channel: Option<u8>,
@@ -127,7 +129,7 @@ impl Default for Agent {
       identity: Identity::default(),
       view: View::default(),
       lastsession: LastSession::default(),
-      server: None,
+      server: Some(Server::default().into()),
       started_at: std::time::SystemTime::now(),
       current_channel: None,
       total_aps: 0,
@@ -146,13 +148,14 @@ impl Default for Agent {
 impl Agent {
   pub fn new() -> Self {
     let bettercap = Bettercap::new();
+    let display = get_display_from_config();
     let mut agent = Self {
       bettercap,
       automata: Automata::new(),
       identity: Identity::new(),
-      view: View::new(),
+      view: View::new(display),
       lastsession: LastSession::new(),
-      server: None,
+      server: Some(Server::new()),
       started_at: std::time::SystemTime::now(),
       current_channel: None,
       total_aps: 0,
@@ -181,6 +184,13 @@ impl Agent {
 
     self.supported_channels = utils::iface_channels(&config().main.interface);
     self.identity.initialize();
+
+    if let Some(server) = &self.server {
+      let server = Arc::clone(server);
+      tokio::spawn(async move {
+        server.start().await;
+      });
+    }
 
     LOGGER.log_info(
       "Pwnagotchi",
@@ -326,6 +336,14 @@ impl Agent {
     self.automata.set_ready();
   }
 
+  pub async fn start_server(&mut self) {
+    if let Some(ref mut server) = self.server {
+      server.start().await;
+    } else {
+      LOGGER.log_warning("Agent", "No server available for initialization");
+    }
+  }
+
   #[allow(clippy::future_not_send)]
   pub async fn stop(&mut self) {
     LOGGER.log_info("Agent", "Stopping agent...");
@@ -389,8 +407,8 @@ impl Agent {
       recon_time *= recon_multiplier;
     }
 
-    self.view.set("channel", StateValue::Text("*".into()));
     LOGGER.log_debug("RECON", "Starting Recon");
+    self.view.set("channel", &StateValue::Text("*".into()));
 
     if channels.is_empty() {
       self.current_channel = Some(0);
@@ -430,6 +448,7 @@ impl Agent {
 
     if config().personality.associate && self.should_interact(&ap.mac) {
       self.view.on_assoc(ap);
+
       LOGGER.log_info(
         "AGENT",
         &format!(
@@ -683,7 +702,7 @@ impl Agent {
         Ok(()) => {
           self.current_channel = Some(channel);
           self.automata.epoch.track("hop", Some(1));
-          self.view.set("channel", StateValue::Number(channel.into()));
+          self.view.set("channel", &StateValue::Number(channel.into()));
           LOGGER.log_info("AGENT", &format!("Switched to channel {channel}"));
         }
         Err(e) => {

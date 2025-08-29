@@ -4,3 +4,4 @@ pub mod old;
 pub mod state;
 pub mod view;
 pub mod components;
+pub mod fonts;
