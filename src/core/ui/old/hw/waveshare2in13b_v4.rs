@@ -26,11 +26,13 @@ impl DisplayTrait for Waveshare2in13bV4 {
     layout.aps = (28, 0);
     layout.uptime = (185,0);
     layout.line1 = ((0.0, 14.0), (250.0, 14.0));
-    layout.line2 = ((0.0, 108.0), (250.0, 108.0));
+    layout.line2 = ((0.0, 108.0), (250.0, 108.01));
     layout.friend_face = (0, 92);
     layout.friend_name = (40, 94);
     layout.shakes = (0, 109);
     layout.mode = (225, 109);
+    layout.status.pos = (38, 93);
+    
     layout
   }
 

@@ -3,10 +3,10 @@ use std::{ path::Path, sync::Arc };
 use ab_glyph::{ Font, FontArc, PxScale, ScaleFont };
 use image::{ DynamicImage, Rgba, RgbaImage };
 use imageproc::{
-  drawing::{ draw_filled_rect_mut, draw_hollow_rect_mut, draw_line_segment_mut, draw_text_mut },
+  drawing::{ draw_filled_rect_mut, draw_hollow_rect_mut, draw_line_segment_mut },
   rect::Rect,
 };
-use crate::core::{ log::LOGGER, ui::state::StateValue };
+use crate::core::{ log::LOGGER, ui::{draw::draw_text_mut, state::StateValue} };
 
 pub trait Widget: Send + Sync {
   fn draw(&self, canvas: &mut RgbaImage);

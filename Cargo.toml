@@ -43,10 +43,10 @@ tower-http = { version = "0.6.6", features = ["fs", "trace"] }
 
 image = "0.25.6"
 imageproc = "0.25.0"
-ab_glyph = "0.2.31"
 fontdb = "0.23.0"
 mime_guess = "2.0.5"
 tera = "1.20.0"
+ab_glyph = "0.2.31"
 
 [workspace.metadata.clippy]
 deny = ["clippy::all", "clippy::pedantic", "clippy::nursery", "clippy::cargo"]

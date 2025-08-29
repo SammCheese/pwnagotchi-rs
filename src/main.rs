@@ -72,10 +72,8 @@ async fn main() {
     exit(EXIT_SUCCESS);
   }
 
-  LOGGER.log_info("Pwnagotchi", "Starting!");
-
   let agent = Arc::new(Mutex::new(Agent::new()));
-  let _e = EventListener::new(Arc::clone(&agent)).start_event_loop();
+  EventListener::new(Arc::clone(&agent)).start_event_loop();
 
   if cli.manual {
     cli::do_manual_mode(agent, Some(cli.skip)).await;

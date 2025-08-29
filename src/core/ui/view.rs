@@ -6,7 +6,6 @@ use std::{
   time::Duration,
 };
 
-use ab_glyph::{ Font, FontRef };
 use image::{ Rgba, RgbaImage };
 use rand::Rng;
 
@@ -99,7 +98,6 @@ impl View {
     let inverted = config().ui.inverted;
     let background_color = if inverted { BLACK } else { WHITE };
     let foreground_color = if inverted { WHITE } else { BLACK };
-
     let mut view = Self {
       display,
       voice: Voice::new(),
@@ -111,8 +109,8 @@ impl View {
       frozen: false,
       ignore_changes: Vec::new(),
       render_callbacks: Vec::new(),
-      width: 200,
-      height: 200,
+      width: 0,
+      height: 0,
     };
     view.initialize();
     view
@@ -120,6 +118,8 @@ impl View {
 
   fn initialize(&mut self) {
     self.populate_state();
+    self.width = self.display.layout().width;
+    self.height = self.display.layout().height;
     if config().ui.fps > 0.0 {
       self.start_render_loop();
     } else {
@@ -159,13 +159,16 @@ impl View {
 
   fn populate_state(&mut self) {
     let layout = self.display.layout();
-    let font = &FONTS.lock()
-      .unwrap()
-      .fonts.get(&FontType::Regular)
-      .cloned()
-      .unwrap_or_else(|| {
-        Arc::new(FONTS.lock().unwrap().get_font_arc("DejaVu Sans Mono").unwrap())
-      });
+    
+    let font = FONTS.lock()
+      .unwrap().fonts.get(&FontType::Regular)
+      .cloned();
+    
+
+    let Some(font) = &font else {
+      LOGGER.log_error("UI", "Failed to load font for UI components");
+      return;
+    };
 
     let channel = LabeledValue::new(
       layout.channel,
@@ -238,17 +241,17 @@ impl View {
     );
 
     let mut handle = self.state.elements.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    handle.insert("channel".to_owned(), Arc::new(channel));
-    handle.insert("aps".to_owned(), Arc::new(aps));
-    handle.insert("line1".to_owned(), Arc::new(line1));
-    handle.insert("line2".to_owned(), Arc::new(line2));
-    handle.insert("uptime".to_owned(), Arc::new(uptime));
-    handle.insert("face".to_owned(), Arc::new(face));
-    handle.insert("friend_name".to_owned(), Arc::new(friend_name));
-    handle.insert("name".to_owned(), Arc::new(name));
-    handle.insert("status".to_owned(), Arc::new(status));
-    handle.insert("shakes".to_owned(), Arc::new(shakes));
-    handle.insert("mode".to_owned(), Arc::new(mode));
+    handle.insert("channel".to_owned(), Arc::new(Mutex::new(channel)) as Arc<Mutex<dyn Widget>>);
+    handle.insert("aps".to_owned(), Arc::new(Mutex::new(aps)) as Arc<Mutex<dyn Widget>>);
+    handle.insert("line1".to_owned(), Arc::new(Mutex::new(line1)) as Arc<Mutex<dyn Widget>>);
+    handle.insert("line2".to_owned(), Arc::new(Mutex::new(line2)) as Arc<Mutex<dyn Widget>>);
+    handle.insert("uptime".to_owned(), Arc::new(Mutex::new(uptime)) as Arc<Mutex<dyn Widget>>);
+    handle.insert("face".to_owned(), Arc::new(Mutex::new(face)) as Arc<Mutex<dyn Widget>>);
+    handle.insert("friend_name".to_owned(), Arc::new(Mutex::new(friend_name)) as Arc<Mutex<dyn Widget>>);
+    handle.insert("name".to_owned(), Arc::new(Mutex::new(name)) as Arc<Mutex<dyn Widget>>);
+    handle.insert("status".to_owned(), Arc::new(Mutex::new(status)) as Arc<Mutex<dyn Widget>>);
+    handle.insert("shakes".to_owned(), Arc::new(Mutex::new(shakes)) as Arc<Mutex<dyn Widget>>);
+    handle.insert("mode".to_owned(), Arc::new(Mutex::new(mode)) as Arc<Mutex<dyn Widget>>);
   }
 
   pub fn set_agent(&mut self, agent: Arc<Agent>) {
@@ -265,8 +268,9 @@ impl View {
     }
   }
 
-  pub fn add_element(&self, key: &str, elem: Arc<dyn Widget>) {
-    self.state.add_element(key, elem);
+  pub fn add_element<T: Widget + 'static>(&self, key: &str, elem: T) {
+    let wrapped_elem: Arc<Mutex<dyn Widget>> = Arc::new(Mutex::new(elem));
+    self.state.add_element(key, wrapped_elem);
   }
 
   pub fn on_state_change<F>(&self, key: &str, callback: F)
@@ -459,7 +463,7 @@ impl View {
     self.update(None, None);
   }
 
-  pub fn get(&self, key: &str) -> Option<Arc<dyn Widget>> {
+  pub fn get(&self, key: &str) -> Option<Arc<Mutex<dyn Widget>>> {
     self.state.get(key)
   }
 
@@ -488,7 +492,8 @@ impl View {
     // iterate and check for special faces
     self.state
       .get("face")
-      .filter(|face| {
+      .filter(|face_arc| {
+        let face = face_arc.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let StateValue::Face(face) = face.get_value() else {
           return false;
         };
@@ -551,17 +556,18 @@ impl View {
       return;
     }
 
-    let state = &self.state;
-    let changes = state.changes(&self.ignore_changes);
+    let changes = self.state.changes(&self.ignore_changes);
 
     if force || !changes.is_empty() {
+      LOGGER.log_debug("UI", "Change!");
       let mut canvas = RgbaImage::new(self.width, self.height);
 
-      for (_key, widget) in self.state.items() {
+      for widget in self.state.items().values() {
+        let widget = widget.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         widget.draw(&mut canvas);
       }
 
-      frame::update_frame(&canvas);
+      let _ = frame::update_frame(&canvas);
 
       for cb in &self.render_callbacks {
         cb(&canvas);

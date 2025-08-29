@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{ Arc, Mutex as StdMutex };
 
 use tokio::sync::{mpsc, Mutex};
 use crate::core::{ agent::Agent, events::handler::EventHandler, log::LOGGER };
@@ -17,20 +17,18 @@ impl EventListener {
     }
   }
 
-  pub async fn start_event_loop(self) {
+  pub fn start_event_loop(self) {
     LOGGER.log_debug("Agent", "Starting event loop...");
-
-    let mut bc_rx = {
-      let agent = self.agent.lock().await;
-      agent.bettercap.subscribe_events()
-    };
-
 
     LOGGER.log_debug("EVENT", "Got Agent Lock!");
 
     let (tx, mut rx) = mpsc::channel::<String>(1000);
 
     tokio::spawn(async move {
+      let mut bc_rx = {
+        let agent = self.agent.lock().await;
+        agent.bettercap.subscribe_events()
+      };
       loop {
         match bc_rx.recv().await {
           Ok(msg) => {

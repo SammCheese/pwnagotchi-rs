@@ -18,7 +18,7 @@ pub enum StateValue {
     Bool(bool),
 }
 
-pub type Element = HashMap<String, Arc<dyn Widget>>;
+pub type Element = HashMap<String, Arc<Mutex<dyn Widget>>>;
 
 #[derive(Clone)]
 pub struct State {
@@ -44,7 +44,7 @@ impl State {
         }
     }
 
-    pub fn add_element(&self, key: &str, elem: Arc<dyn Widget>) {
+    pub fn add_element(&self, key: &str, elem: Arc<Mutex<dyn Widget>>) {
         self
             .elements
             .lock()
@@ -97,12 +97,13 @@ impl State {
             .clone()
     }
 
-    pub fn get(&self, key: &str) -> Option<Arc<dyn Widget>> {
+    pub fn get(&self, key: &str) -> Option<Arc<Mutex<dyn Widget>>> {
         self
             .elements
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .get(key).cloned()
+            .get(key)
+            .cloned()
     }
 
     pub fn reset(&self) {
@@ -134,16 +135,23 @@ impl State {
     }
 
     pub fn set(&self, key: &str, value: &StateValue) {
-        let mut elements = self
-            .elements
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if let Some(elem) = elements.get_mut(key) {
-            let widget = Arc::get_mut(elem).expect("Widget Arc should be uniquely owned for mutation");
+        // Take a clone of the widget Arc and drop the elements lock ASAP
+        let elem = {
+            let elements = self
+                .elements
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            elements.get(key).cloned()
+        };
+
+        if let Some(elem) = elem {
+            let mut widget = elem.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             let prev_value = widget.get_value();
             if prev_value != *value {
-                self
-                    .changes
+                widget.set_value(value);
+                drop(widget);
+
+                self.changes
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner)
                     .insert(key.to_string(), true);
