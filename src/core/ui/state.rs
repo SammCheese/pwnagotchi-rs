@@ -1,13 +1,11 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::Mutex;
-use std::panic::{catch_unwind, AssertUnwindSafe};
 
 use crate::core::ui::components::Widget;
 use crate::core::ui::view::FaceType;
 
 type Listener<T> = Box<dyn Fn(T, T) + Send + Sync>;
-
 
 #[derive(Clone, PartialEq, Eq)]
 pub enum StateValue {
@@ -27,12 +25,10 @@ pub struct State {
     pub changes: Arc<Mutex<HashMap<String, bool>>>,
 }
 
-
 impl Default for State {
     fn default() -> Self {
         Self::new()
     }
-    
 }
 
 impl State {
@@ -45,34 +41,29 @@ impl State {
     }
 
     pub fn add_element(&self, key: &str, elem: Arc<Mutex<dyn Widget>>) {
-        self
-            .elements
+        self.elements
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .insert(key.to_string(), elem);
-        self
-            .changes
+        self.changes
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .insert(key.to_string(), true);
     }
 
     pub fn has_element(&self, key: &str) -> bool {
-        self
-            .elements
+        self.elements
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .contains_key(key)
     }
 
     pub fn remove_element(&self, key: &str) {
-        self
-            .elements
+        self.elements
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .remove(key);
-        self
-            .changes
+        self.changes
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .insert(key.to_string(), true);
@@ -82,24 +73,21 @@ impl State {
     where
         F: Fn(StateValue, StateValue) + Send + Sync + 'static,
     {
-        self
-            .listeners
+        self.listeners
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .insert(key.to_string(), Box::new(cb));
     }
 
     pub fn items(&self) -> Element {
-        self
-            .elements
+        self.elements
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone()
     }
 
     pub fn get(&self, key: &str) -> Option<Arc<Mutex<dyn Widget>>> {
-        self
-            .elements
+        self.elements
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .get(key)
@@ -107,8 +95,7 @@ impl State {
     }
 
     pub fn reset(&self) {
-        self
-            .changes
+        self.changes
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clear();
@@ -134,37 +121,41 @@ impl State {
             .is_empty()
     }
 
-    pub fn set(&self, key: &str, value: &StateValue) {
-        // Take a clone of the widget Arc and drop the elements lock ASAP
-        let elem = {
+    pub fn set(&self, key: &str, value: StateValue) {
+        let prev_value_opt = {
             let elements = self
                 .elements
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             elements.get(key).cloned()
-        };
-
-        if let Some(elem) = elem {
-            let mut widget = elem.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        }
+        .map(|elem| {
+            let mut widget = elem
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             let prev_value = widget.get_value();
-            if prev_value != *value {
-                widget.set_value(value);
-                drop(widget);
+            let new_value = value.clone();
+            widget.set_value(value);
+            drop(widget);
+            (prev_value, new_value)
+        });
 
-                self.changes
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .insert(key.to_string(), true);
+        self.changes
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(key.to_string(), true);
 
-                if let Some(listener) = self
-                    .listeners
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .get(key)
-                {
-                    let _ = catch_unwind(AssertUnwindSafe(|| (listener)(prev_value, value.clone())));
-                }
-            }
+        if let Some((prev_value, new_value)) = prev_value_opt
+            && prev_value != new_value
+            && let Some(listener) = self
+                .listeners
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .get(key)
+        {
+            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                listener(prev_value, new_value);
+            }));
         }
     }
 }

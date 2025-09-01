@@ -1,75 +1,97 @@
-use std::{ sync::Arc, time::Duration };
-//use std::thread::sleep;
-use tokio::{ sync::Mutex, time::sleep };
+use std::{sync::Arc, time::Duration};
+use tokio::{sync::oneshot, time::sleep};
 
-use crate::core::{ agent::{ Agent, RunningMode }, log::LOGGER };
+use crate::core::{
+    agent::RunningMode,
+    commands::{AgentCommand, AgentHandle},
+    log::LOGGER,
+};
 
-#[allow(clippy::future_not_send)]
-pub async fn do_auto_mode(agent: Arc<Mutex<Agent>>) {
-  LOGGER.log_info("Pwnagotchi", "Starting auto mode...");
+pub async fn do_auto_mode(agent: Arc<AgentHandle>, skip: Option<bool>) {
+    LOGGER.log_info("Pwnagotchi", "Starting auto mode...");
 
-  {
-    let mut a = agent.lock().await;
-    a.mode = RunningMode::Auto;
-    a.start().await;
-    drop(a);
-  }
+    // Set mode and perform internal setup
+    agent
+        .send_command(AgentCommand::SetMode {
+            mode: RunningMode::Auto,
+        })
+        .await;
 
-  loop {
-    let channels = {
-      let mut a = agent.lock().await;
-      a.recon().await;
-      a.get_access_points_by_channel().await
-    };
-    LOGGER.log_info("Pwnagotchi", &format!("Found {} channels with access points", channels.len()));
+    agent
+        .send_command(AgentCommand::ParseLastSession { skip })
+        .await;
+    agent.send_command(AgentCommand::Start).await;
 
-    for (ch, aps) in channels {
-      {
-        agent.lock().await.set_channel(ch).await;
-      }
-      sleep(Duration::from_secs(5)).await;
+    loop {
+        // Start Reconning
+        agent.send_command(AgentCommand::Recon).await;
 
-      {
-        let mut a = agent.lock().await;
-        if !a.automata.is_stale() && a.automata.any_activity() {
-          LOGGER.log_info("Pwnagotchi", &format!("{} APs on channel {}", aps.len(), ch));
+        let (tx, rx) = oneshot::channel();
+
+        // Fetch channels and APs inside them
+        agent
+            .send_command(AgentCommand::GetAccessPointsByChannel { respond_to: tx })
+            .await;
+
+        for (ch, aps) in rx.await.unwrap_or_default() {
+            // Dont Spam just yet...
+            sleep(Duration::from_secs(1)).await;
+
+            // Set the channel
+            agent
+                .send_command(AgentCommand::SetChannel { channel: ch })
+                .await;
+
+            sleep(Duration::from_secs(5)).await;
+            LOGGER.log_info(
+                "Pwnagotchi",
+                &format!("{} APs on channel {}", aps.len(), ch),
+            );
+
+            for ap in aps {
+                let ap_clone = ap.clone();
+                // Associate to every AP
+                agent
+                    .send_command(AgentCommand::Associate {
+                        ap: ap_clone.clone(),
+                        throttle: None,
+                    })
+                    .await;
+                for sta in ap.clients {
+                    // Deauth everyone!
+                    agent
+                        .send_command(AgentCommand::Deauth {
+                            ap: Box::new(ap_clone.clone()),
+                            sta,
+                            throttle: None,
+                        })
+                        .await;
+                    sleep(Duration::from_secs(1)).await;
+                }
+            }
         }
-      }
 
-      for ap in aps {
-        {
-          agent.lock().await.associate(&ap, None).await;
-        }
-        for sta in &ap.clients {
-          {
-            agent.lock().await.deauth(&ap, sta, None).await;
-          }
-          sleep(Duration::from_secs(1)).await;
-        }
-      }
+        agent
+            .execute(|agent| {
+                agent.automata.next_epoch();
+            })
+            .await;
     }
-
-    {
-      let mut a = agent.lock().await;
-      a.automata.next_epoch();
-    }
-  }
 }
 
-pub async fn do_manual_mode(agent: Arc<Mutex<Agent>>, skip: Option<bool>) {
-  LOGGER.log_info("Pwnagotchi", "Starting in manual mode...");
+pub async fn do_manual_mode(agent: Arc<AgentHandle>, skip: Option<bool>) {
+    LOGGER.log_info("Pwnagotchi", "Starting in manual mode...");
 
-  {
-    let mut a = agent.lock().await;
-    a.mode = RunningMode::Manual;
-  }
-  {
-    let mut lastsession = agent.lock().await.lastsession.clone();
-    let a = agent.lock().await;
-    lastsession.parse(&a.view, skip);
-  }
+    agent
+        .send_command(AgentCommand::SetMode {
+            mode: RunningMode::Manual,
+        })
+        .await;
+    agent
+        .send_command(AgentCommand::ParseLastSession { skip })
+        .await;
 
-  loop {
-    sleep(Duration::from_secs(60)).await;
-  }
+    loop {
+        sleep(Duration::from_secs(60)).await;
+    }
 }

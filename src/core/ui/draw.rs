@@ -1,98 +1,130 @@
-use ab_glyph::{point, Font, GlyphId, OutlinedGlyph, PxScale, Rect, ScaleFont};
-use image::{GenericImage, Pixel};
-use imageproc::definitions::{Clamp, Image};
-use imageproc::drawing::Canvas;
+#![allow(
+    clippy::cast_possible_wrap,
+    clippy::cast_possible_truncation,
+    clippy::cast_precision_loss,
+    clippy::cast_sign_loss
+)]
+use cosmic_text::{Attrs, Buffer, CacheKeyFlags, Color, Family, Metrics, Shaping};
+use image::{Rgba, RgbaImage};
 
-/// Layout glyphs and call back with their outlines and bounding boxes.
-fn layout_glyphs(
-    scale: impl Into<PxScale> + Copy,
-    font: &impl Font,
-    text: &str,
-    mut f: impl FnMut(OutlinedGlyph, Rect),
-) -> (u32, u32) {
-    if text.is_empty() {
-        return (0, 0);
-    }
-    let font = font.as_scaled(scale);
+use crate::core::{
+    log::LOGGER,
+    ui::fonts::{FONT_CACHE, FONTS},
+};
 
-    let mut w = 0.0;
-    let mut prev: Option<GlyphId> = None;
+/// Draws text onto a mutable RGBA image canvas at the specified position, font, color, and size.
+///
+/// # Panics
+/// This function will panic if locking the font system or font cache mutex fails.
+pub fn draw_text_mut(
+    content: &str,
+    canvas: &mut RgbaImage,
+    pos: (u32, u32),
+    font: &str,
+    color: Rgba<u8>,
+    size: f32,
+) -> u32 {
+    let mut font_system = match FONTS.lock() {
+        Ok(fs) => fs,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    let mut swash_cache = match FONT_CACHE.lock() {
+        Ok(cache) => cache,
+        Err(poisoned) => poisoned.into_inner(),
+    };
 
-    for c in text.chars() {
-        let glyph_id = font.glyph_id(c);
-        let glyph = glyph_id.with_scale_and_position(scale, point(w, font.ascent()));
-        w += font.h_advance(glyph_id);
-        if let Some(g) = font.outline_glyph(glyph) {
-            if let Some(prev) = prev {
-                w += font.kern(glyph_id, prev);
-            }
-            prev = Some(glyph_id);
-            let bb = g.px_bounds();
-            f(g, bb);
+    let requested_exists = font_system
+        .db()
+        .faces()
+        .any(|f| f.families.iter().any(|(name, _)| name == font));
+
+    let resolved_family: String = if requested_exists {
+        font.to_string()
+    } else {
+        let fallback = font_system
+            .db()
+            .faces()
+            .next()
+            .and_then(|f| f.families.first().map(|(name, _)| name.clone()))
+            .unwrap_or_else(|| "Sans-Serif".to_string());
+        LOGGER.log_warning(
+            "Fonts",
+            &format!("Font '{font}' not found, using '{fallback}'."),
+        );
+        fallback
+    };
+
+    let fontsize = size;
+    let lineheight = size * 1.2;
+    let metrics = Metrics::new(fontsize, lineheight);
+
+    let mut buffer = Buffer::new(&mut font_system, metrics);
+    let mut buffer = buffer.borrow_with(&mut font_system);
+
+    let canvas_width = canvas.width();
+    let canvas_height = canvas.height();
+    let canvas_width_i32 = canvas_width as i32;
+    let canvas_height_i32 = canvas_height as i32;
+
+    let avail_w = canvas_width.saturating_sub(pos.0) as f32;
+    let avail_h = canvas_height.saturating_sub(pos.1) as f32;
+    buffer.set_size(Some(avail_w), Some(avail_h));
+
+    let mut attrs = Attrs::new().family(Family::Name(&resolved_family));
+    attrs = attrs.cache_key_flags(CacheKeyFlags::DISABLE_HINTING);
+    buffer.set_text(content, &attrs, Shaping::Advanced);
+    buffer.shape_until_scroll(true);
+
+    let base_color = Color::rgba(color[0], color[1], color[2], color[3]);
+
+    let off_x = pos.0 as i32;
+    let off_y = pos.1 as i32;
+
+    let mut min_draw_x: i32 = i32::MAX;
+    let mut max_draw_x: i32 = i32::MIN;
+
+    buffer.draw(&mut swash_cache, base_color, |x, y, w, h, c| {
+        let a = c.a();
+        if a == 0 {
+            return;
         }
-    }
 
-    let w = w.ceil();
-    let h = font.height().ceil();
-    assert!(w >= 0.0);
-    assert!(h >= 0.0);
-    (1 + w as u32, h as u32)
-}
+        if w > 0 {
+            min_draw_x = min_draw_x.min(x);
+            max_draw_x = max_draw_x.max(x + w as i32);
+        }
 
-/// Get the width and height of the given text.
-pub fn text_size(scale: impl Into<PxScale> + Copy, font: &impl Font, text: &str) -> (u32, u32) {
-    layout_glyphs(scale, font, text, |_, _| {})
-}
+        for dy in 0..h {
+            for dx in 0..w {
+                let tx = x + off_x + (dx as i32);
+                let ty = y + off_y + (dy as i32);
 
-/// Draw text, returning a new image.
-pub fn draw_text<I>(
-    image: &I,
-    color: I::Pixel,
-    x: i32,
-    y: i32,
-    scale: impl Into<PxScale> + Copy,
-    font: &impl Font,
-    text: &str,
-) -> Image<I::Pixel>
-where
-    I: GenericImage,
-    <I::Pixel as Pixel>::Subpixel: Into<f32> + Clamp<f32>,
-{
-    let mut out = Image::new(image.width(), image.height());
-    out.copy_from(image, 0, 0).unwrap();
-    draw_text_mut(&mut out, color, x, y, scale, font, text);
-    out
-}
-
-/// Draws non-antialiased text directly onto a canvas.
-pub fn draw_text_mut<C>(
-    canvas: &mut C,
-    color: C::Pixel,
-    x: i32,
-    y: i32,
-    scale: impl Into<PxScale> + Copy,
-    font: &impl Font,
-    text: &str,
-) where
-    C: Canvas,
-    <C::Pixel as Pixel>::Subpixel: Into<f32> + Clamp<f32>,
-{
-    let image_width = canvas.width() as i32;
-    let image_height = canvas.height() as i32;
-
-    layout_glyphs(scale, font, text, |g, bb| {
-        let x_shift = x + bb.min.x.round() as i32;
-        let y_shift = y + bb.min.y.round() as i32;
-        g.draw(|gx, gy, gv| {
-            let image_x = gx as i32 + x_shift;
-            let image_y = gy as i32 + y_shift;
-
-            if (0..image_width).contains(&image_x) && (0..image_height).contains(&image_y) {
-                // Disable AA: snap gv to 0 or 1
-                if gv >= 0.35 {
-                    canvas.draw_pixel(image_x as u32, image_y as u32, color);
+                if tx < 0 || ty < 0 || tx >= canvas_width_i32 || ty >= canvas_height_i32 {
+                    continue;
                 }
+
+                let dst = canvas.get_pixel(tx as u32, ty as u32).0;
+                let src_a = u32::from(a);
+                let inv_a = 255u32 - src_a;
+
+                let blend = |s: u8, d: u8| -> u8 {
+                    ((u32::from(s) * src_a + u32::from(d) * inv_a) / 255).min(255) as u8
+                };
+
+                let r = blend(c.r(), dst[0]);
+                let g = blend(c.g(), dst[1]);
+                let b = blend(c.b(), dst[2]);
+                let out_a = (src_a + (u32::from(dst[3]) * inv_a) / 255).min(255) as u8;
+
+                canvas.put_pixel(tx as u32, ty as u32, Rgba([r, g, b, out_a]));
             }
-        });
+        }
     });
+
+    let width_px: u32 = if min_draw_x <= max_draw_x {
+        (max_draw_x - min_draw_x) as u32
+    } else {
+        0
+    };
+    width_px
 }

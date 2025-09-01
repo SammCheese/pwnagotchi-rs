@@ -15,75 +15,112 @@
 
 extern crate pwnagotchi_rs;
 
-use std::{ process::exit, sync::Arc };
 use clap::Parser;
-use nix::libc::{ EXIT_SUCCESS };
+use nix::libc::EXIT_SUCCESS;
 use pwnagotchi_rs::core::{
-  agent::Agent,
-  cli,
-  config::{ config, init_config },
-  events::listener::EventListener, log::LOGGER,
+    agent::Agent,
+    cli,
+    commands::spawn_agent,
+    config::{config, init_config},
+    events::listener::start_event_loop,
+    identity::Identity,
+    log::LOGGER,
+    stats::SessionFetcher,
+    ui::old::web::server::Server,
 };
-use tokio::{sync::Mutex};
+use std::{process::exit, sync::Arc};
 
 #[derive(Parser, Debug)]
 struct Cli {
-  #[clap(
-    short = 'C',
-    long = "config",
-    default_value = "/etc/pwnagotchi/config.toml",
-    help = "The configuration file to use"
-  )]
-  config: String,
-  #[clap(short = 'l', long = "log-level", default_value = "info", help = "The log level to use")]
-  log_level: String,
-  #[clap(short = 'm', long = "manual", default_value = "false", help = "Whether to do manual mode")]
-  manual: bool,
-  #[clap(short, long = "clear", default_value = "false", help = "Clears the screen and exits")]
-  clear: bool,
-  #[clap(short, long = "debug", default_value = "false", help = "Enables debug mode")]
-  debug: bool,
-  #[clap(long = "version", help = "Prints the version information")]
-  show_version: bool,
-  #[clap(long = "print-config", help = "Prints the configuration")]
-  print_config: bool,
-  #[clap(long = "skip", help = "Skip parsing")]
-  skip: bool,
+    #[clap(
+        short = 'C',
+        long = "config",
+        default_value = "/etc/pwnagotchi/config.toml",
+        help = "The configuration file to use"
+    )]
+    config: String,
+    #[clap(
+        short = 'l',
+        long = "log-level",
+        default_value = "info",
+        help = "The log level to use"
+    )]
+    log_level: String,
+    #[clap(
+        short = 'm',
+        long = "manual",
+        default_value = "false",
+        help = "Whether to do manual mode"
+    )]
+    manual: bool,
+    #[clap(
+        short,
+        long = "clear",
+        default_value = "false",
+        help = "Clears the screen and exits"
+    )]
+    clear: bool,
+    #[clap(
+        short,
+        long = "debug",
+        default_value = "false",
+        help = "Enables debug mode"
+    )]
+    debug: bool,
+    #[clap(long = "version", help = "Prints the version information")]
+    show_version: bool,
+    #[clap(long = "print-config", help = "Prints the configuration")]
+    print_config: bool,
+    #[clap(long = "skip", help = "Skip parsing")]
+    skip: bool,
 }
 
 #[tokio::main]
 async fn main() {
     let cli = Cli::parse();
 
-  if cli.clear {
-    println!("\x1B[2J\x1B[1;1H");
-    exit(EXIT_SUCCESS);
-  }
-  if cli.show_version {
-    println!("Version: {}", version());
-    exit(EXIT_SUCCESS);
-  }
+    if cli.clear {
+        println!("\x1B[2J\x1B[1;1H");
+        exit(EXIT_SUCCESS);
+    }
+    if cli.show_version {
+        println!("Version: {}", version());
+        exit(EXIT_SUCCESS);
+    }
 
-  // will default to /etc/pwnagotchi/config.toml unless specified
-  init_config(&cli.config);
+    // will default to /etc/pwnagotchi/config.toml unless specified
+    init_config(&cli.config);
 
-  if cli.print_config {
-    println!("Configuration: {:?}", config());
-    exit(EXIT_SUCCESS);
-  }
+    if cli.print_config {
+        println!("Configuration: {:?}", config());
+        exit(EXIT_SUCCESS);
+    }
 
-  let agent = Arc::new(Mutex::new(Agent::new()));
-  EventListener::new(Arc::clone(&agent)).start_event_loop();
+    let identity = Identity::new();
+    let agent = Agent::new();
+    let handle = Arc::new(spawn_agent(agent));
+    Server::new().start();
+    start_event_loop(&Arc::clone(&handle));
+    SessionFetcher::new().start_sessionfetcher(Arc::clone(&handle));
 
-  if cli.manual {
-    cli::do_manual_mode(agent, Some(cli.skip)).await;
-  } else {
-    cli::do_auto_mode(agent).await;
-  }
+    LOGGER.log_info(
+        "Pwnagotchi",
+        &format!(
+            "Pwnagotchi {}@{} (v{})",
+            config().main.name,
+            identity.fingerprint(),
+            env!("CARGO_PKG_VERSION")
+        ),
+    );
 
+    if cli.manual {
+        cli::do_manual_mode(Arc::clone(&handle), Some(cli.skip)).await;
+    } else {
+        cli::do_auto_mode(Arc::clone(&handle), Some(cli.skip)).await;
+    }
 }
 
 #[must_use]
 pub const fn version() -> &'static str {
-  env!("CARGO_PKG_VERSION")
+    env!("CARGO_PKG_VERSION")
 }

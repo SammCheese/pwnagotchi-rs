@@ -1,6 +1,19 @@
-#![allow(clippy::cast_possible_truncation, clippy::cast_precision_loss, clippy::struct_excessive_bools)]
-use std::{ collections::HashMap, time::{ Duration, Instant }, vec };
-use crate::core::{ agent::{AccessPoint, Peer}, ai::reward::RewardFunction, config::Config, mesh::wifi };
+#![allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_precision_loss,
+    clippy::struct_excessive_bools
+)]
+use crate::core::{
+    ai::reward::RewardFunction,
+    config::Config,
+    mesh::wifi,
+    models::net::{AccessPoint, Peer},
+};
+use std::{
+    collections::HashMap,
+    time::{Duration, Instant},
+    vec,
+};
 use tokio::sync::mpsc::{Receiver, Sender, channel};
 
 pub struct Epoch {
@@ -151,11 +164,7 @@ impl Epoch {
         }
     }
 
-    pub fn observe(
-        &mut self,
-        aps: &Vec<AccessPoint>,
-        peers: &Vec<Peer>,
-    ) {
+    pub fn observe(&mut self, aps: &Vec<AccessPoint>, peers: &Vec<Peer>) {
         let num_aps = aps.len();
         if num_aps == 0 {
             self.blind_for += 1;
@@ -166,7 +175,8 @@ impl Epoch {
         let bond_unit_scale = self.config.personality.bond_encounters_factor;
         self.num_peers = peers.len().try_into().unwrap_or(0);
 
-        self.total_bond_factor = aps.iter()
+        self.total_bond_factor = aps
+            .iter()
             .map(|ap| {
                 #[allow(clippy::cast_possible_truncation)]
                 let bond_factor = (f64::from(ap.rssi) / f64::from(bond_unit_scale)) as f32;
@@ -182,9 +192,11 @@ impl Epoch {
         #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
         let num_aps_f = (aps.len() as f64) as f32 + 1e-10;
 
-        let num_sta = aps.iter()
+        let num_sta = aps
+            .iter()
             .map(|ap| ap.clients.len() as u32 as f32)
-            .sum::<f32>() / num_aps_f;
+            .sum::<f32>()
+            / num_aps_f;
 
         let num_channels = usize::try_from(wifi::NUM_CHANNELS).unwrap_or(0);
         let mut aps_per_chan = vec![0.0; num_channels];
@@ -290,27 +302,27 @@ impl Epoch {
                 self.did_deauth = true;
                 self.num_deauths += increment.unwrap_or(1);
                 self.any_activity = true;
-            },
+            }
             "association" => {
                 self.did_associate = true;
                 self.num_assocs += increment.unwrap_or(1);
                 self.any_activity = true;
-            },
+            }
             "miss" => {
                 self.num_missed += increment.unwrap_or(1);
-            },
+            }
             "hop" => {
                 self.num_hops += increment.unwrap_or(1);
                 self.did_deauth = false;
                 self.did_associate = false;
-            },
+            }
             "handshake" => {
                 self.num_handshakes += increment.unwrap_or(1);
                 self.did_handshakes = true;
-            },
+            }
             "sleep" => {
                 self.num_slept += increment.unwrap_or(1);
-            },
+            }
             _ => (),
         }
     }
@@ -318,14 +330,12 @@ impl Epoch {
     pub async fn wait_for_epoch_data(
         &mut self,
         with_observation: bool,
-        timeout: Option<Duration>
+        timeout: Option<Duration>,
     ) -> Option<(Option<Observation>, EpochData)> {
         let data = match timeout {
-            Some(t) => {
-                match tokio::time::timeout(t, self.data_rx.recv()).await {
-                    Ok(Some(data)) => data,
-                    _ => return None,
-                }
+            Some(t) => match tokio::time::timeout(t, self.data_rx.recv()).await {
+                Ok(Some(data)) => data,
+                _ => return None,
             },
             None => self.data_rx.recv().await?,
         };

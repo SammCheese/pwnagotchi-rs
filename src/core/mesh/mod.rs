@@ -1,2 +1,2 @@
-pub mod wifi;
 pub mod advertiser;
+pub mod wifi;

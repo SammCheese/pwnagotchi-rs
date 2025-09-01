@@ -13,31 +13,31 @@
 #![warn(clippy::pedantic)]
 #![allow(clippy::must_use_candidate)]
 
- pub mod core {
-    pub mod config;
-    pub mod bettercap;
-    pub mod log;
+pub mod core {
     pub mod agent;
-    pub mod identity;
-    pub mod utils;
     pub mod ai;
-    pub mod mesh;
     pub mod automata;
+    pub mod bettercap;
     pub mod cli;
-    pub mod models;
-    pub mod ui;
+    pub mod commands;
+    pub mod config;
     pub mod events;
-    pub mod voice;
+    pub mod identity;
+    pub mod log;
+    pub mod mesh;
+    pub mod models;
     pub mod session;
+    pub mod stats;
+    pub mod ui;
+    pub mod utils;
+    pub mod voice;
 }
 
 mod traits {
-    pub mod sysdata;
-    pub mod syscontrol;
     pub mod hostname;
     pub mod logger;
+    pub mod syscontrol;
+    pub mod sysdata;
 }
 
-mod net {
-
-}
+mod net {}
