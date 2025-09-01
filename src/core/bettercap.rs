@@ -7,8 +7,8 @@ use futures_util::{
 };
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::{sync::Arc, time::Duration};
-use tokio::net::TcpStream;
 use tokio::sync::broadcast;
+use tokio::{net::TcpStream, sync::mpsc};
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
 use tungstenite::protocol::Message;
 
@@ -32,6 +32,57 @@ pub struct Bettercap {
     scheme: String,
 
     event_tx: broadcast::Sender<String>,
+}
+
+pub enum BettercapCommand {
+    Run {
+        args: Vec<String>,
+        respond_to: tokio::sync::oneshot::Sender<Result<(), anyhow::Error>>,
+    },
+    GetSession {
+        respond_to: tokio::sync::oneshot::Sender<Option<BettercapSession>>,
+    },
+    SubscribeEvents {
+        respond_to: tokio::sync::oneshot::Sender<broadcast::Receiver<String>>,
+    },
+}
+
+#[derive(Clone)]
+pub struct BettercapHandle {
+    pub command_tx: mpsc::Sender<BettercapCommand>,
+}
+
+impl BettercapHandle {
+    pub async fn send_command(&self, cmd: BettercapCommand) {
+        let _ = self.command_tx.send(cmd).await;
+    }
+}
+
+pub fn spawn_bettercap(bc: Bettercap) -> BettercapHandle {
+    let (tx, mut rx) = mpsc::channel::<BettercapCommand>(100);
+
+    tokio::spawn(async move {
+        let bettercap = bc;
+
+        while let Some(cmd) = rx.recv().await {
+            match cmd {
+                BettercapCommand::Run { args, respond_to } => {
+                    let args_ref: Vec<&str> =
+                        args.iter().map(std::string::String::as_str).collect();
+                    let res = bettercap.run(&args_ref).await;
+                    let _ = respond_to.send(res);
+                }
+                BettercapCommand::GetSession { respond_to } => {
+                    let _ = respond_to.send(bettercap.session(None).await);
+                }
+                BettercapCommand::SubscribeEvents { respond_to } => {
+                    let _ = respond_to.send(bettercap.subscribe_events());
+                }
+            }
+        }
+    });
+
+    BettercapHandle { command_tx: tx }
 }
 
 impl Default for Bettercap {
@@ -108,7 +159,6 @@ impl Bettercap {
         }
     }
 
-    #[must_use]
     pub fn is_ready(&self) -> bool {
         self.is_ready.load(Ordering::SeqCst)
     }

@@ -1,23 +1,23 @@
 use std::sync::Arc;
 
 use crate::core::{
-    commands::{AgentCommand, AgentHandle},
+    bettercap::{BettercapCommand, BettercapHandle},
+    commands::AgentHandle,
     events::handler::EventHandler,
     log::LOGGER,
 };
 
-pub fn start_event_loop(agent: &Arc<AgentHandle>) {
+pub fn start_event_loop(agent: &Arc<AgentHandle>, bc: &Arc<BettercapHandle>) {
     let (tx, mut rx) = tokio::sync::mpsc::channel::<String>(1000);
 
-    let handler = EventHandler::new(Arc::clone(&agent));
+    let handler = EventHandler::new(Arc::clone(agent));
 
     tokio::spawn({
         let tx = tx;
-        let agent = Arc::clone(agent);
+        let bc = Arc::clone(bc);
         async move {
             let (bc_tx, bc_rx) = tokio::sync::oneshot::channel();
-            agent
-                .send_command(AgentCommand::GetBettercapBroadcast { respond_to: bc_tx })
+            bc.send_command(BettercapCommand::SubscribeEvents { respond_to: bc_tx })
                 .await;
 
             let Ok(mut bettercap_rx) = bc_rx.await else {

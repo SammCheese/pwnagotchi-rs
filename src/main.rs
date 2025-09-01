@@ -19,6 +19,7 @@ use clap::Parser;
 use nix::libc::EXIT_SUCCESS;
 use pwnagotchi_rs::core::{
     agent::Agent,
+    bettercap::{Bettercap, spawn_bettercap},
     cli,
     commands::spawn_agent,
     config::{config, init_config},
@@ -97,11 +98,12 @@ async fn main() {
     }
 
     let identity = Identity::new();
-    let agent = Agent::new();
+    let bettercap = Arc::new(spawn_bettercap(Bettercap::new()));
+    let agent = Agent::new(Arc::clone(&bettercap));
     let handle = Arc::new(spawn_agent(agent));
-    Server::new().start();
-    start_event_loop(&Arc::clone(&handle));
+    start_event_loop(&Arc::clone(&handle), &Arc::clone(&bettercap));
     SessionFetcher::new().start_sessionfetcher(Arc::clone(&handle));
+    Server::new().start();
 
     LOGGER.log_info(
         "Pwnagotchi",

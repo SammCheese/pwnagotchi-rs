@@ -1,6 +1,6 @@
 use std::{any::Any, pin::Pin};
 
-use tokio::sync::{broadcast, mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot};
 
 use crate::core::{
     agent::{Agent, RunningMode},
@@ -25,9 +25,6 @@ pub enum AgentCommand {
     SetView {
         key: String,
         value: StateValue,
-    },
-    GetBettercapBroadcast {
-        respond_to: oneshot::Sender<broadcast::Receiver<String>>,
     },
     Start,
     Stop,
@@ -107,10 +104,6 @@ pub fn spawn_agent(agent: Agent) -> AgentHandle {
                 }
                 AgentCommand::SetView { key, value } => {
                     agent.automata.view.set(&key, value);
-                }
-                AgentCommand::GetBettercapBroadcast { respond_to } => {
-                    let rx = agent.bettercap.subscribe_events();
-                    let _ = respond_to.send(rx);
                 }
                 AgentCommand::Start => {
                     agent.start().await;

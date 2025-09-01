@@ -122,8 +122,9 @@ impl Automata {
     }
 
     pub async fn wait_for(&mut self, duration: u32, sleeping: Option<bool>) {
-        self.epoch.track("sleep", Some(duration));
+        let sleeping = sleeping.unwrap_or(true);
         self.view.wait(duration.into(), sleeping, self).await;
+        self.epoch.track("sleep", Some(duration));
     }
 
     pub fn is_stale(&mut self) -> bool {

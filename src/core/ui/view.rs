@@ -545,8 +545,7 @@ impl View {
         })
     }
 
-    pub async fn wait(&self, mut secs: f64, sleeping: Option<bool>, automata: &Automata) {
-        let sleeping = sleeping.unwrap_or(true);
+    pub async fn wait(&self, mut secs: f64, sleeping: bool, automata: &Automata) {
         let was_normal = self.is_normal();
         let part = secs / 10.0;
 
