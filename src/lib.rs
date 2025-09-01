@@ -14,30 +14,30 @@
 #![allow(clippy::must_use_candidate)]
 
 pub mod core {
-    pub mod agent;
-    pub mod ai;
-    pub mod automata;
-    pub mod bettercap;
-    pub mod cli;
-    pub mod commands;
-    pub mod config;
-    pub mod events;
-    pub mod identity;
-    pub mod log;
-    pub mod mesh;
-    pub mod models;
-    pub mod session;
-    pub mod stats;
-    pub mod ui;
-    pub mod utils;
-    pub mod voice;
+  pub mod agent;
+  pub mod ai;
+  pub mod automata;
+  pub mod bettercap;
+  pub mod cli;
+  pub mod commands;
+  pub mod config;
+  pub mod events;
+  pub mod identity;
+  pub mod log;
+  pub mod mesh;
+  pub mod models;
+  pub mod session;
+  pub mod stats;
+  pub mod ui;
+  pub mod utils;
+  pub mod voice;
 }
 
 mod traits {
-    pub mod hostname;
-    pub mod logger;
-    pub mod syscontrol;
-    pub mod sysdata;
+  pub mod hostname;
+  pub mod logger;
+  pub mod syscontrol;
+  pub mod sysdata;
 }
 
 mod net {}
