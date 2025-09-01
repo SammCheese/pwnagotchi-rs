@@ -653,7 +653,7 @@ impl Agent {
             }
         }
 
-        aps.sort_by_key(|ap| -ap.rssi);
+        aps.sort_by_key(|ap| ap.channel);
 
         self.set_access_points(aps.clone());
 

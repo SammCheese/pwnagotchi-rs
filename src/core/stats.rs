@@ -55,22 +55,22 @@ async fn update_aps(agent: &AgentHandle) {
                 agent
                     .automata
                     .view
-                    .set("aps", StateValue::Text(format!("{tot_aps}")));
+                    .set("aps", StateValue::Text(tot_aps.to_string()));
                 agent
                     .automata
                     .view
-                    .set("sta", StateValue::Text(format!("{tot_stas}")));
+                    .set("sta", StateValue::Text(tot_stas.to_string()));
             } else {
                 let aps_on_channel = agent.get_aps_on_channel(agent.current_channel);
                 let stas_on_channel: usize = aps_on_channel.iter().map(|ap| ap.clients.len()).sum();
                 agent
                     .automata
                     .view
-                    .set("aps", StateValue::Text(format!("{}", aps_on_channel.len())));
+                    .set("aps", StateValue::Text(format!("{} ({})", aps_on_channel.len(), tot_aps)));
                 agent
                     .automata
                     .view
-                    .set("sta", StateValue::Text(format!("{stas_on_channel}")));
+                    .set("sta", StateValue::Text(format!("{stas_on_channel} ({tot_stas})")));
             }
         })
         .await;

@@ -71,27 +71,6 @@ pub struct View {
     pub height: u32,
 }
 
-impl Default for View {
-    fn default() -> Self {
-        let inverted = false;
-        let background_color = WHITE;
-        let foreground_color = BLACK;
-        Self {
-            voice: Voice::new(),
-            state: State::new(),
-            display: get_display_from_config(),
-            inverted,
-            background_color,
-            foreground_color,
-            frozen: false,
-            ignore_changes: Vec::new(),
-            render_callbacks: Vec::new(),
-            width: 200,
-            height: 200,
-        }
-    }
-}
-
 impl View {
     pub fn new(display: Box<dyn DisplayTrait>) -> Self {
         let inverted = config().ui.inverted;
@@ -169,7 +148,7 @@ impl View {
         let aps = LabeledValue::new(
             layout.aps,
             "APS".to_string(),
-            "0 (00)".to_string(),
+            "0".to_string(),
             fontname,
             image::Rgba(self.foreground_color.0),
             10.0,
@@ -190,6 +169,7 @@ impl View {
             fontname,
             image::Rgba(self.foreground_color.0),
             40.0,
+            cosmic_text::Weight::NORMAL,
             None,
             false,
         );
@@ -199,6 +179,7 @@ impl View {
             fontname,
             image::Rgba(self.foreground_color.0),
             10.0,
+            cosmic_text::Weight::NORMAL,
             None,
             false,
         );
@@ -208,6 +189,7 @@ impl View {
             fontname,
             image::Rgba(self.foreground_color.0),
             10.0,
+            cosmic_text::Weight::NORMAL,
             None,
             false,
         );
@@ -217,6 +199,7 @@ impl View {
             fontname,
             image::Rgba(self.foreground_color.0),
             8.0,
+            cosmic_text::Weight::NORMAL,
             Some(40),
             true,
         );
@@ -234,6 +217,7 @@ impl View {
             fontname,
             image::Rgba(self.foreground_color.0),
             10.0,
+            cosmic_text::Weight::EXTRA_BOLD,
             None,
             false,
         );

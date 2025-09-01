@@ -81,7 +81,7 @@ pub fn total_unique_handshakes(handshakes_path: &str) -> u32 {
 
     if let Ok(entries) = fs::read_dir(handshakes_path) {
         for entry in entries.filter_map(Result::ok) {
-            if entry.path().extension().is_some_and(|ext| ext == "cap") {
+            if entry.path().extension().is_some_and(|ext| ext == "pcap") {
                 total += 1;
             }
         }

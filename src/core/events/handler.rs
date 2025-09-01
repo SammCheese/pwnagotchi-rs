@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::core::{commands::AgentHandle, log::LOGGER, models::net::Handshake};
+use crate::core::{commands::AgentHandle, config::config, log::LOGGER, models::net::Handshake, ui::state::StateValue, utils::total_unique_handshakes};
 use serde_json::Value;
 
 #[derive(Clone)]
@@ -14,9 +14,9 @@ impl EventHandler {
     }
 
     pub async fn on_event_async(&self, raw: String) {
+        LOGGER.log_debug("Agent", &format!("Received event: {raw}"));
         match serde_json::from_str::<Value>(&raw) {
             Ok(jmsg) => {
-                LOGGER.log_debug("Agent", &format!("Received event: {jmsg}"));
                 if let Some(tag) = jmsg.get("tag").and_then(|v| v.as_str())
                     && tag == "wifi.client.handshake"
                 {
@@ -30,6 +30,7 @@ impl EventHandler {
     }
 
     async fn handle_handshake_event(&self, jmsg: Value) {
+        LOGGER.log_info("BIG EVENT", format!("{jmsg}").as_str());
         let data = jmsg.get("data").cloned().unwrap_or_default();
         let ap_mac = data
             .get("ap")
@@ -65,11 +66,11 @@ impl EventHandler {
                     LOGGER.log_warning("Agent", &format!("!!! captured new handshake: {key} !!!"));
                     agent.automata.epoch.track("handshake", Some(1));
 
-                    let total = crate::core::utils::total_unique_handshakes(
-                        &crate::core::config::config().main.handshakes_path,
+                    let total = total_unique_handshakes(
+                        &config().main.handshakes_path,
                     );
                     let current = agent.handshakes.len();
-                    let mut text = format!("{current} ({total})");
+                    let mut text = format!("{current} ({total:02})");
                     if let Some(last_pwned) = &agent.last_pwned {
                         use std::fmt::Write;
                         let _ = write!(text, " [{last_pwned}]");
@@ -77,7 +78,7 @@ impl EventHandler {
                     agent
                         .automata
                         .view
-                        .set("shakes", crate::core::ui::state::StateValue::Text(text));
+                        .set("shakes", StateValue::Text(text));
                     agent.automata.view.on_handshakes(1);
                 }
             })

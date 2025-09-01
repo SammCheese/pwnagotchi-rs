@@ -14,7 +14,7 @@ pub struct Automata {
 impl Default for Automata {
     fn default() -> Self {
         let epoch = Epoch::new();
-        let view = View::default();
+        let view = View::new(get_display_from_config());
         Self { epoch, view }
     }
 }

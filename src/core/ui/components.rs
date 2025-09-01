@@ -117,6 +117,7 @@ pub struct TextWidget {
     font: String,
     color: Rgba<u8>,
     size: f32,
+    style: cosmic_text::Weight,
     max_length: Option<usize>,
     wrap: bool,
 }
@@ -127,6 +128,7 @@ impl TextWidget {
         font: &str,
         color: Rgba<u8>,
         size: f32,
+        style: cosmic_text::Weight,
         max_length: Option<usize>,
         wrap: bool,
     ) -> Self {
@@ -136,6 +138,7 @@ impl TextWidget {
             font: font.to_string(),
             color,
             size,
+            style,
             max_length,
             wrap,
         }
@@ -150,6 +153,7 @@ impl Widget for TextWidget {
             &self.font,
             self.color,
             self.size,
+            self.style
         );
     }
     fn set_value(&mut self, value: StateValue) {
@@ -217,6 +221,7 @@ impl Widget for LabeledValue {
             &self.font,
             self.color,
             self.size,
+            cosmic_text::Weight::EXTRA_BOLD
         );
         draw_text_mut(
             &self.value,
@@ -225,6 +230,7 @@ impl Widget for LabeledValue {
             &self.font,
             self.color,
             self.size,
+            cosmic_text::Weight::NORMAL
         );
     }
     fn set_value(&mut self, value: StateValue) {

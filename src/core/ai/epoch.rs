@@ -5,7 +5,7 @@
 )]
 use crate::core::{
     ai::reward::RewardFunction,
-    config::Config,
+    config::{config},
     mesh::wifi,
     models::net::{AccessPoint, Peer},
 };
@@ -22,7 +22,6 @@ pub struct Epoch {
     data_tx: Sender<EpochData>,
     data_rx: Receiver<EpochData>,
     pub epoch: u64,
-    pub config: Config,
 
     pub inactive_for: u32,
     pub active_for: u32,
@@ -136,7 +135,6 @@ impl Epoch {
             data_tx,
             data_rx,
             epoch: 0,
-            config: Config::default(),
             inactive_for: 0,
             active_for: 0,
             blind_for: 0,
@@ -172,7 +170,7 @@ impl Epoch {
             self.blind_for = 0;
         }
 
-        let bond_unit_scale = self.config.personality.bond_encounters_factor;
+        let bond_unit_scale = config().personality.bond_encounters_factor;
         self.num_peers = peers.len().try_into().unwrap_or(0);
 
         self.total_bond_factor = aps
@@ -244,10 +242,10 @@ impl Epoch {
             self.bored_for = 0;
         }
 
-        if self.inactive_for >= self.config.personality.sad_num_epochs {
+        if self.inactive_for >= config().personality.sad_num_epochs {
             self.bored_for = 0;
             self.sad_for += 1;
-        } else if self.inactive_for >= self.config.personality.bored_num_epochs {
+        } else if self.inactive_for >= config().personality.bored_num_epochs {
             self.sad_for = 0;
             self.bored_for += 1;
         } else {
