@@ -1,6 +1,7 @@
 #![allow(clippy::unwrap_used, clippy::missing_panics_doc)]
 
-use crate::core::{config::config, ui::old::web::frame::FRAME_PATH};
+use std::sync::Arc;
+
 use axum::{
   Extension,
   http::{StatusCode, header},
@@ -8,10 +9,12 @@ use axum::{
 };
 use serde::Serialize;
 use serde_json::json;
-use std::sync::Arc;
 use tera::{Context, Tera};
 
+use crate::core::{config::config, ui::old::web::frame::FRAME_PATH};
+
 #[derive(Serialize)]
+
 struct NavItem {
   url: String,
   id: String,
@@ -62,17 +65,25 @@ fn default_navigation() -> Vec<NavItem> {
 
 pub async fn index_handler(Extension(tera): Extension<Arc<Tera>>) -> Html<String> {
   let mut ctx = Context::new();
-  ctx.insert("title", config().main.name.as_str());
+
+  ctx.insert("title", &config().main.name);
+
   ctx.insert("other_mode", "AUTO");
+
   ctx.insert("fingerprint", "XXXX");
+
   ctx.insert("navigations", &default_navigation());
+
   ctx.insert("active_page", "home");
+
   let rendered = tera.render("index.html", &ctx).unwrap();
+
   Html(rendered)
 }
 
 pub async fn inbox_handler(Extension(tera): Extension<Arc<Tera>>) -> Html<String> {
   let mut ctx = Context::new();
+
   ctx.insert(
     "inbox",
     &json!({
@@ -80,7 +91,9 @@ pub async fn inbox_handler(Extension(tera): Extension<Arc<Tera>>) -> Html<String
       "messages": [],
     }),
   );
+
   let rendered = tera.render("inbox.html", &ctx).unwrap();
+
   Html(rendered)
 }
 
@@ -99,10 +112,6 @@ pub async fn ui() -> impl IntoResponse {
     .header(header::EXPIRES, "0")
     .body(frame.into())
     .unwrap_or_else(|_| {
-      (
-        StatusCode::INTERNAL_SERVER_ERROR,
-        "Failed to build response",
-      )
-        .into_response()
+      (StatusCode::INTERNAL_SERVER_ERROR, "Failed to build response").into_response()
     })
 }

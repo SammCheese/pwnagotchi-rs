@@ -1,13 +1,14 @@
-use std::collections::HashMap;
-use std::sync::Arc;
-use std::sync::Mutex;
+use std::{
+  collections::HashMap,
+  sync::{Arc, Mutex},
+};
 
-use crate::core::ui::components::Widget;
-use crate::core::ui::view::FaceType;
+use crate::core::ui::{components::Widget, view::FaceType};
 
 type Listener<T> = Box<dyn Fn(T, T) + Send + Sync>;
 
 #[derive(Clone, PartialEq, Eq)]
+
 pub enum StateValue {
   None,
   Face(FaceType),
@@ -19,6 +20,7 @@ pub enum StateValue {
 pub type Element = HashMap<String, Arc<Mutex<dyn Widget>>>;
 
 #[derive(Clone)]
+
 pub struct State {
   pub elements: Arc<Mutex<Element>>,
   pub listeners: Arc<Mutex<HashMap<String, Listener<StateValue>>>>,
@@ -46,6 +48,7 @@ impl State {
       .lock()
       .unwrap_or_else(std::sync::PoisonError::into_inner)
       .insert(key.to_string(), elem);
+
     self
       .changes
       .lock()
@@ -67,6 +70,7 @@ impl State {
       .lock()
       .unwrap_or_else(std::sync::PoisonError::into_inner)
       .remove(key);
+
     self
       .changes
       .lock()
@@ -86,11 +90,7 @@ impl State {
   }
 
   pub fn items(&self) -> Element {
-    self
-      .elements
-      .lock()
-      .unwrap_or_else(std::sync::PoisonError::into_inner)
-      .clone()
+    self.elements.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone()
   }
 
   pub fn get(&self, key: &str) -> Option<Arc<Mutex<dyn Widget>>> {
@@ -103,23 +103,13 @@ impl State {
   }
 
   pub fn reset(&self) {
-    self
-      .changes
-      .lock()
-      .unwrap_or_else(std::sync::PoisonError::into_inner)
-      .clear();
+    self.changes.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clear();
   }
 
   pub fn changes(&self, ignore: &[&str]) -> Vec<String> {
-    let changes = self
-      .changes
-      .lock()
-      .unwrap_or_else(std::sync::PoisonError::into_inner);
-    changes
-      .keys()
-      .filter(|k| !ignore.contains(&k.as_str()))
-      .cloned()
-      .collect()
+    let changes = self.changes.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+
+    changes.keys().filter(|k| !ignore.contains(&k.as_str())).cloned().collect()
   }
 
   pub fn has_changes(&self) -> bool {
@@ -132,16 +122,11 @@ impl State {
 
   pub fn set(&self, key: &str, value: StateValue) {
     let prev_value_opt = {
-      let elements = self
-        .elements
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+      let elements = self.elements.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
       elements.get(key).cloned()
     }
     .map(|elem| {
-      let mut widget = elem
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+      let mut widget = elem.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
       let prev_value = widget.get_value();
       let new_value = value.clone();
       widget.set_value(value);

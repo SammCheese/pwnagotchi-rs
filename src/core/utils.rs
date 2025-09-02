@@ -1,6 +1,7 @@
+use std::{fs, process::Command, time::Duration};
+
 use rand::Rng;
 use regex::Regex;
-use std::{fs, process::Command, time::Duration};
 
 use crate::core::{
   agent::RunningMode,
@@ -10,13 +11,11 @@ use crate::core::{
 };
 
 pub fn iface_channels(name: &str) -> Vec<u8> {
-  let phy_out = match Command::new("/sbin/iw")
-    .args(["dev", name, "info"])
-    .output()
-  {
+  let phy_out = match Command::new("/sbin/iw").args(["dev", name, "info"]).output() {
     Ok(output) => output,
     Err(e) => {
       eprintln!("Failed to execute iw dev info: {e}");
+
       return vec![];
     }
   };
@@ -26,14 +25,11 @@ pub fn iface_channels(name: &str) -> Vec<u8> {
   }
 
   let phy_str = String::from_utf8_lossy(&phy_out.stdout);
+
   let phy_id = phy_str
     .lines()
     .find_map(|line| {
-      if line.trim_start().starts_with("wiphy") {
-        line.split_whitespace().nth(1)
-      } else {
-        None
-      }
+      if line.trim_start().starts_with("wiphy") { line.split_whitespace().nth(1) } else { None }
     })
     .unwrap_or("");
 
@@ -41,13 +37,12 @@ pub fn iface_channels(name: &str) -> Vec<u8> {
     return vec![];
   }
 
-  let chan_out = match Command::new("/sbin/iw")
-    .args([&format!("phy{phy_id}"), "channels"])
-    .output()
+  let chan_out = match Command::new("/sbin/iw").args([&format!("phy{phy_id}"), "channels"]).output()
   {
     Ok(output) => output,
     Err(e) => {
       eprintln!("Failed to execute iw phy channels: {e}");
+
       return vec![];
     }
   };
@@ -62,10 +57,13 @@ pub fn iface_channels(name: &str) -> Vec<u8> {
     Ok(regex) => regex,
     Err(e) => {
       eprintln!("Failed to compile regex: {e}");
+
       return vec![];
     }
   };
+
   let mut channels = Vec::new();
+
   for cap in re.captures_iter(&chan_str) {
     if let Some(m) = cap.get(1)
       && let Ok(ch) = m.as_str().parse::<u8>()
@@ -73,6 +71,7 @@ pub fn iface_channels(name: &str) -> Vec<u8> {
       channels.push(ch);
     }
   }
+
   channels
 }
 
@@ -103,29 +102,28 @@ pub fn format_duration_human(duration: Duration) -> String {
   let seconds = duration.as_secs();
   let minutes = seconds / 60;
   let hours = minutes / 60;
-
   format!("{:02}:{:02}:{:02}", hours, minutes % 60, seconds % 60)
 }
 
-pub enum STAP {
-  Station(Station),
-  AccessPoint(AccessPoint),
+pub enum STAP<'a> {
+  Station(&'a Station),
+  AccessPoint(&'a AccessPoint),
 }
 
-pub fn hostname_or_mac(station: &STAP) -> String {
+pub fn hostname_or_mac<'a>(station: &'a STAP<'a>) -> &'a str {
   match station {
     STAP::Station(sta) => {
       if sta.hostname.trim().is_empty() || sta.hostname.contains("<hidden>") {
-        sta.mac.clone()
+        &sta.mac
       } else {
-        sta.hostname.clone()
+        &sta.hostname
       }
     }
     STAP::AccessPoint(ap) => {
       if ap.hostname.trim().is_empty() || ap.hostname.contains("<hidden>") {
-        ap.mac.clone()
+        &ap.mac
       } else {
-        ap.hostname.clone()
+        &ap.hostname
       }
     }
   }
@@ -140,8 +138,9 @@ pub fn mode_to_str(mode: RunningMode) -> String {
   }
 }
 
-pub fn face_to_string(face: FaceType) -> String {
+pub fn face_to_string(face: &FaceType) -> String {
   let faces = &config().faces;
+
   let face_str = match face {
     FaceType::LookR => &faces.look_r,
     FaceType::LookL => &faces.look_l,
@@ -169,5 +168,6 @@ pub fn face_to_string(face: FaceType) -> String {
     FaceType::Upload1 => &faces.upload1,
     FaceType::Upload2 => &faces.upload2,
   };
-  face_str.clone()
+
+  face_str.to_string()
 }

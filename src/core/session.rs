@@ -1,7 +1,7 @@
 #![allow(clippy::struct_field_names)]
 #![allow(clippy::unused_self)]
 
-use std::{collections::HashMap, fs};
+use std::{borrow::Cow, collections::HashMap, fs};
 
 use chrono::{DateTime, Utc};
 use hex::ToHex;
@@ -12,22 +12,32 @@ use crate::core::{
 };
 
 const EPOCH_TOKEN: &str = r"[epoch ";
+
 const EPOCH_PARSER: &str = r"^.+\[epoch (\d+)] (.+)$";
+
 const EPOCH_DATA_PARSER: &str = r"([a-z_]+)=(\S+)";
+
 const TRAINING_TOKEN: &str = r" training epoch ";
+
 const START_TOKEN: &str = r"Initializing Agent";
+
 const DEAUTH_TOKEN: &str = r"deauthing ";
+
 const ASSOC_TOKEN: &str = r"sending association frame to ";
+
 const HANDSHAKE_TOKEN: &str = r"!!! captured new handshake ";
+
 const PEER_TOKEN: &str = r"detected unit ";
+
 const PEER_PARSER: &str = r"detected unit (.+)@(.+) \(v.+\) on channel \d+ \(([\d\-]+) dBm\) \[sid:(.+) pwnd_tot:(\d+) uptime:(\d+)]";
 
 const LAST_SESSION_FILE: &str = "/root/pwnagotchi/.pwnagotchi-last-session";
 
 #[derive(Debug, Clone)]
+
 pub struct LastSession {
   pub voice: Voice,
-  pub path: String,
+  pub path: Cow<'static, str>,
   pub last_session: Vec<String>,
   pub last_session_id: String,
   pub last_saved_session_id: String,
@@ -50,7 +60,7 @@ impl Default for LastSession {
   fn default() -> Self {
     Self {
       voice: Voice::new(),
-      path: config().main.log_path.clone(),
+      path: Cow::Borrowed(&config().main.log_path),
       last_session: Vec::new(),
       last_session_id: String::new(),
       last_saved_session_id: String::new(),
@@ -83,6 +93,7 @@ impl LastSession {
 
   fn get_last_saved_session_id(&self) -> String {
     let saved = "";
+
     fs::read_to_string(LAST_SESSION_FILE)
       .unwrap_or_else(|_| saved.to_string())
       .trim()
@@ -91,6 +102,7 @@ impl LastSession {
 
   pub fn save_session_id(&mut self, session_id: &str) {
     fs::write(LAST_SESSION_FILE, session_id).unwrap_or(());
+
     self.last_saved_session_id = self.last_session_id.clone();
   }
 
@@ -106,17 +118,15 @@ impl LastSession {
       self.parsed = true;
       return;
     }
+
     LOGGER.log_debug("Session", "Reading last session logs...");
 
     let mut lines: Vec<String> = vec![];
 
-    match fs::read_to_string(&self.path) {
+    match fs::read_to_string(&*self.path) {
       Ok(content) => {
-        let content_lines: Vec<String> = content
-          .lines()
-          .map(|line| line.trim().to_string())
-          .rev()
-          .collect();
+        let content_lines: Vec<String> =
+          content.lines().map(|line| line.trim().to_string()).rev().collect();
 
         for line in content_lines {
           if !line.is_empty() && !line.starts_with('[') {
@@ -130,6 +140,7 @@ impl LastSession {
           }
 
           let lines_so_far = lines.len() as u64;
+
           if lines_so_far.is_multiple_of(100) {
             ui.on_reading_logs(lines_so_far);
           }
@@ -144,12 +155,12 @@ impl LastSession {
         self.last_session.clone_from(&lines);
         self.last_session_id = md5::compute(lines[0].as_bytes()).encode_hex::<String>();
         self.last_saved_session_id = self.get_last_saved_session_id();
-
         self.parse_stats();
         self.parsed = true;
       }
       Err(e) => {
         LOGGER.log_error("Session", &format!("Failed to read session log file: {e}"));
+
         self.parsed = true;
       }
     }
@@ -163,42 +174,37 @@ impl LastSession {
     let epoch_data_re = match regex::Regex::new(EPOCH_DATA_PARSER) {
       Ok(re) => re,
       Err(e) => {
-        LOGGER.log_error(
-          "SESSION",
-          &format!("Failed to compile EPOCH_DATA_PARSER regex: {e}"),
-        );
+        LOGGER.log_error("SESSION", &format!("Failed to compile EPOCH_DATA_PARSER regex: {e}"));
         return;
       }
     };
+
     let epoch_re = match regex::Regex::new(EPOCH_PARSER) {
       Ok(re) => re,
       Err(e) => {
-        LOGGER.log_error(
-          "SESSION",
-          &format!("Failed to compile EPOCH_PARSER regex: {e}"),
-        );
+        LOGGER.log_error("SESSION", &format!("Failed to compile EPOCH_PARSER regex: {e}"));
         return;
       }
     };
+
     let peer_re = match regex::Regex::new(PEER_PARSER) {
       Ok(re) => re,
       Err(e) => {
-        LOGGER.log_error(
-          "SESSION",
-          &format!("Failed to compile PEER_PARSER regex: {e}"),
-        );
+        LOGGER.log_error("SESSION", &format!("Failed to compile PEER_PARSER regex: {e}"));
         return;
       }
     };
 
     for line in self.last_session.clone() {
       let parts = line.split(']').collect::<Vec<&str>>();
+
       if parts.len() < 2 {
         continue;
       }
 
       let line_timestamp = parts[0].trim_start_matches('[').trim();
       let line = parts[1..].join("]");
+
       stopped_at = chrono::NaiveDateTime::parse_from_str(line_timestamp, "%Y-%m-%d %H:%M:%S")
         .ok()
         .map(|naive| DateTime::<Utc>::from_naive_utc_and_offset(naive, Utc));
@@ -266,6 +272,7 @@ impl LastSession {
           && let Ok(reward) = value.as_str().parse::<f64>()
         {
           self.avg_reward += reward;
+
           if reward < self.min_reward {
             self.min_reward = reward;
           } else if reward > self.max_reward {
@@ -289,28 +296,24 @@ impl LastSession {
       let pubkey = m.get(2).map_or("", |m| m.as_str()).to_string();
       let rssi = m.get(3).map_or("", |m| m.as_str()).to_string();
       let sid = m.get(4).map_or("", |m| m.as_str()).to_string();
-      let pwnd_tot = m
-        .get(5)
-        .map_or("0", |m| m.as_str())
-        .parse::<u32>()
-        .unwrap_or(0);
+      let pwnd_tot = m.get(5).map_or("0", |m| m.as_str()).parse::<u32>().unwrap_or(0);
 
       if !cache.contains_key(&pubkey) {
         self.last_peer = Some(Peer {
-          session_id: sid,
+          session_id: sid.into(),
           channel: 1,
           rssi: rssi.parse::<i32>().unwrap_or(0),
-          identity: pubkey.clone(),
+          identity: pubkey.into(),
           advertisement: Advertisement {
             name,
             pwnd_total: pwnd_tot,
             ..Advertisement::default()
           },
         });
-      } else if let Some(last_peer) = self.last_peer.clone()
+      } else if let Some(last_peer) = &self.last_peer
         && let Some(entry) = cache.get_mut(&pubkey)
       {
-        *entry = CacheType::Peer(Box::new(last_peer));
+        *entry = CacheType::Peer(Box::new(last_peer.clone()));
       }
     }
   }
@@ -322,18 +325,16 @@ impl LastSession {
   ) {
     if let (Some(start), Some(stop)) = (started_at, stopped_at) {
       let duration = stop.signed_duration_since(start);
+
       self.duration = format!("{duration}");
     } else {
       self.duration = "0".into();
     }
 
     let seconds = self.duration.parse::<u64>().unwrap_or(0);
+
     self.duration_human = format_duration_human(std::time::Duration::from_secs(seconds));
 
-    self.avg_reward /= if self.epochs > 0 {
-      f64::from(self.epochs)
-    } else {
-      1.0
-    };
+    self.avg_reward /= if self.epochs > 0 { f64::from(self.epochs) } else { 1.0 };
   }
 }

@@ -1,1 +1,33 @@
+# Personal Preference. Abide it >:)
 tab_spaces = 2
+hard_tabs = false
+
+# General
+max_width = 100
+use_small_heuristics = "Max"
+newline_style = "Unix"
+
+# Imports
+reorder_imports = true
+reorder_modules = true
+group_imports = "StdExternalCrate"
+imports_granularity = "Crate"
+
+# Structs/Functions
+fn_single_line = false
+empty_item_single_line = true
+
+# Spacing
+blank_lines_upper_bound = 1
+blank_lines_lower_bound = 0
+single_line_let_else_max_width = 100
+
+# Visuals
+array_width = 40
+chain_width = 80
+struct_lit_width = 40
+match_arm_blocks = true
+
+wrap_comments =  true
+format_code_in_doc_comments = true
+normalize_doc_attributes = true

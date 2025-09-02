@@ -11,42 +11,26 @@ use crate::core::{
 };
 
 type BoxFutureUnit = Pin<Box<dyn Future<Output = ()> + Send + 'static>>;
+
 type BoxFutureAny = Pin<Box<dyn Future<Output = Box<dyn Any + Send>> + Send + 'static>>;
 
 pub enum AgentCommand {
   Sync(Box<dyn FnOnce(&mut Agent) + Send>),
   Async(Box<dyn (FnOnce(&mut Agent) -> BoxFutureUnit) + Send>),
-  GetAccessPointsByChannel {
-    respond_to: oneshot::Sender<Vec<(u8, Vec<AccessPoint>)>>,
-  },
-  SetMode {
-    mode: RunningMode,
-  },
-  SetView {
-    key: String,
-    value: StateValue,
-  },
+  GetAccessPointsByChannel { respond_to: oneshot::Sender<Vec<(u8, Vec<AccessPoint>)>> },
+  SetMode { mode: RunningMode },
+  SetView { key: String, value: StateValue },
   Start,
   Stop,
   Recon,
-  SetChannel {
-    channel: u8,
-  },
-  Associate {
-    ap: AccessPoint,
-    throttle: Option<f32>,
-  },
-  Deauth {
-    ap: Box<AccessPoint>,
-    sta: Station,
-    throttle: Option<f32>,
-  },
-  ParseLastSession {
-    skip: Option<bool>,
-  },
+  SetChannel { channel: u8 },
+  Associate { ap: Box<AccessPoint>, throttle: Option<f32> },
+  Deauth { ap: Box<AccessPoint>, sta: Box<Station>, throttle: Option<f32> },
+  ParseLastSession { skip: Option<bool> },
 }
 
 #[derive(Clone)]
+
 pub struct AgentHandle {
   pub command_tx: mpsc::Sender<AgentCommand>,
 }
@@ -66,9 +50,7 @@ impl AgentHandle {
   {
     let _ = self
       .command_tx
-      .send(AgentCommand::Async(Box::new(move |agent| {
-        Box::pin(f(agent))
-      })))
+      .send(AgentCommand::Async(Box::new(move |agent| Box::pin(f(agent)))))
       .await;
   }
 
@@ -93,14 +75,13 @@ pub fn spawn_agent(agent: Agent) -> AgentHandle {
         }
         AgentCommand::GetAccessPointsByChannel { respond_to } => {
           let out = agent.get_access_points_by_channel().await;
+
           let _ = respond_to.send(out);
         }
         AgentCommand::SetMode { mode } => {
           agent.mode = mode;
-          agent
-            .automata
-            .view
-            .set("mode", StateValue::Text(mode_to_str(mode)));
+
+          agent.automata.view.set("mode", StateValue::Text(mode_to_str(mode)));
         }
         AgentCommand::SetView { key, value } => {
           agent.automata.view.set(&key, value);

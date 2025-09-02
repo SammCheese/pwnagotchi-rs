@@ -1,4 +1,5 @@
 #![allow(clippy::cast_possible_truncation)]
+
 use std::collections::HashMap;
 
 use crate::core::{
@@ -10,7 +11,6 @@ use crate::core::{
 
 pub struct AsyncAdvertiser {
   pub agent: Agent,
-  pub identity: Identity,
   pub advertisement: Advertisement,
   pub peers: HashMap<String, Advertisement>,
   pub closest_peer: Option<String>,
@@ -30,11 +30,11 @@ pub struct Advertisement {
 }
 
 impl AsyncAdvertiser {
-  pub fn new(agent: Agent, identity: Identity) -> Self {
+  pub fn new(agent: Agent, identity: &Identity) -> Self {
     let advertisement = Advertisement {
-      name: config().main.name.clone(),
+      name: config().main.name.to_string(),
       version: env!("CARGO_PKG_VERSION").to_string(),
-      identity: identity.fingerprint(),
+      identity: identity.fingerprint().to_string(),
       face: "(._.)".to_string(),
       pwnd_run: 0,
       pwnd_total: 0,
@@ -45,7 +45,6 @@ impl AsyncAdvertiser {
 
     Self {
       agent,
-      identity,
       advertisement,
       peers: HashMap::new(),
       closest_peer: None,

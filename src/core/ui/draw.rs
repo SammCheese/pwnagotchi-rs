@@ -4,6 +4,7 @@
   clippy::cast_precision_loss,
   clippy::cast_sign_loss
 )]
+
 use cosmic_text::{Attrs, Buffer, CacheKeyFlags, Color, Family, Metrics, Shaping, Weight};
 use image::{Rgba, RgbaImage};
 
@@ -12,10 +13,12 @@ use crate::core::{
   ui::fonts::{FONT_CACHE, FONTS},
 };
 
-/// Draws text onto a mutable RGBA image canvas at the specified position, font, color, and size.
+/// Draws text onto a mutable RGBA image canvas at the specified position, font,
+/// color, and size.
 ///
 /// # Panics
-/// This function will panic if locking the font system or font cache mutex fails.
+/// This function will panic if locking the font system or font cache mutex
+/// fails.
 pub fn draw_text_mut(
   content: &str,
   canvas: &mut RgbaImage,
@@ -29,6 +32,7 @@ pub fn draw_text_mut(
     Ok(fs) => fs,
     Err(poisoned) => poisoned.into_inner(),
   };
+
   let mut swash_cache = match FONT_CACHE.lock() {
     Ok(cache) => cache,
     Err(poisoned) => poisoned.into_inner(),
@@ -48,37 +52,34 @@ pub fn draw_text_mut(
       .next()
       .and_then(|f| f.families.first().map(|(name, _)| name.clone()))
       .unwrap_or_else(|| "Sans-Serif".to_string());
-    LOGGER.log_warning(
-      "Fonts",
-      &format!("Font '{font}' not found, using '{fallback}'."),
-    );
+
+    LOGGER.log_warning("Fonts", &format!("Font '{font}' not found, using '{fallback}'."));
+
     fallback
   };
 
   let fontsize = size;
   let lineheight = size * 1.2;
   let metrics = Metrics::new(fontsize, lineheight);
-
   let mut buffer = Buffer::new(&mut font_system, metrics);
   let mut buffer = buffer.borrow_with(&mut font_system);
-
   let canvas_width = canvas.width();
   let canvas_height = canvas.height();
   let canvas_width_i32 = canvas_width as i32;
   let canvas_height_i32 = canvas_height as i32;
-
   let avail_w = canvas_width.saturating_sub(pos.0) as f32;
   let avail_h = canvas_height.saturating_sub(pos.1) as f32;
+
   buffer.set_size(Some(avail_w), Some(avail_h));
 
   let mut attrs = Attrs::new().family(Family::Name(&resolved_family));
   attrs = attrs.cache_key_flags(CacheKeyFlags::DISABLE_HINTING);
   attrs = attrs.weight(style);
+
   buffer.set_text(content, &attrs, Shaping::Advanced);
   buffer.shape_until_scroll(true);
 
   let base_color = Color::rgba(color[0], color[1], color[2], color[3]);
-
   let off_x = pos.0 as i32;
   let off_y = pos.1 as i32;
 
@@ -124,10 +125,7 @@ pub fn draw_text_mut(
   });
   drop(font_system);
 
-  let width_px: u32 = if min_draw_x <= max_draw_x {
-    (max_draw_x - min_draw_x) as u32
-  } else {
-    0
-  };
+  let width_px: u32 = if min_draw_x <= max_draw_x { (max_draw_x - min_draw_x) as u32 } else { 0 };
+
   width_px
 }

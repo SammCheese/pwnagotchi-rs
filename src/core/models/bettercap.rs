@@ -1,14 +1,15 @@
+use std::{borrow::Cow, collections::HashMap};
+
 use serde_json::Value;
-use std::collections::HashMap;
 
 use crate::core::models::net::AccessPoint;
 
 #[derive(serde::Deserialize, Debug)]
 pub struct BettercapSession {
-  pub version: String,
-  pub os: String,
-  pub arch: String,
-  pub goversion: String,
+  pub version: Cow<'static, str>,
+  pub os: Cow<'static, str>,
+  pub arch: Cow<'static, str>,
+  pub goversion: Cow<'static, str>,
   pub resources: BResources,
   pub interfaces: Vec<BInterfaces>,
   pub options: HashMap<String, Value>,
@@ -79,14 +80,14 @@ pub struct BEnv {
 
 #[derive(serde::Deserialize, Debug)]
 pub struct BInterface {
-  pub ipv4: String,
-  pub ipv6: String,
-  pub mac: String,
-  pub hostname: String,
-  pub alias: String,
-  pub vendor: String,
-  pub first_seen: String,
-  pub last_seen: String,
+  pub ipv4: Cow<'static, str>,
+  pub ipv6: Cow<'static, str>,
+  pub mac: Cow<'static, str>,
+  pub hostname: Cow<'static, str>,
+  pub alias: Cow<'static, str>,
+  pub vendor: Cow<'static, str>,
+  pub first_seen: Cow<'static, str>,
+  pub last_seen: Cow<'static, str>,
   pub meta: Meta,
 }
 
@@ -107,16 +108,16 @@ pub struct BResources {
 
 #[derive(serde::Deserialize, Debug)]
 pub struct BCaplets {
-  pub path: String,
+  pub path: Cow<'static, str>,
   pub size: u64,
-  pub code: Vec<String>,
-  pub name: String,
+  pub code: Vec<Cow<'static, str>>,
+  pub name: Cow<'static, str>,
   pub scripts: Vec<BScripts>,
 }
 
 #[derive(serde::Deserialize, Debug)]
 pub struct BScripts {
-  pub path: String,
+  pub path: Cow<'static, str>,
   pub size: u64,
   pub code: Vec<String>,
 }
@@ -128,9 +129,9 @@ pub struct BWifi {
 
 #[derive(serde::Deserialize, Debug)]
 pub struct BModule {
-  pub name: String,
-  pub description: String,
-  pub author: String,
+  pub name: Cow<'static, str>,
+  pub description: Cow<'static, str>,
+  pub author: Cow<'static, str>,
   pub parameters: HashMap<String, BModuleParameters>,
   pub handlers: Vec<BModuleHandler>,
   pub running: bool,
@@ -139,34 +140,34 @@ pub struct BModule {
 
 #[derive(serde::Deserialize, Debug)]
 pub struct BModuleHandler {
-  pub name: String,
-  pub description: String,
-  pub parser: String,
+  pub name: Cow<'static, str>,
+  pub description: Cow<'static, str>,
+  pub parser: Cow<'static, str>,
 }
 
 #[derive(serde::Deserialize, Debug)]
 pub struct BModuleParameters {
-  pub name: String,
+  pub name: Cow<'static, str>,
   pub r#type: u16,
-  pub description: String,
-  pub default_value: String,
-  pub current_value: String,
-  pub validator: String,
+  pub description: Cow<'static, str>,
+  pub default_value: Cow<'static, str>,
+  pub current_value: Cow<'static, str>,
+  pub validator: Cow<'static, str>,
 }
 
 #[derive(serde::Deserialize, Debug)]
 pub struct BInterfaces {
   pub index: u32,
   pub mtu: u32,
-  pub name: String,
-  pub mac: String,
-  pub vendor: String,
-  pub flags: Vec<String>,
+  pub name: Cow<'static, str>,
+  pub mac: Cow<'static, str>,
+  pub vendor: Cow<'static, str>,
+  pub flags: Vec<Cow<'static, str>>,
   pub addresses: Vec<BInterfaceAddress>,
 }
 
 #[derive(serde::Deserialize, Debug)]
 pub struct BInterfaceAddress {
-  pub address: String,
-  pub r#type: String,
+  pub address: Cow<'static, str>,
+  pub r#type: Cow<'static, str>,
 }

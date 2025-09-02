@@ -17,8 +17,7 @@ pub fn start_event_loop(agent: &Arc<AgentHandle>, bc: &Arc<BettercapHandle>) {
     let bc = Arc::clone(bc);
     async move {
       let (bc_tx, bc_rx) = tokio::sync::oneshot::channel();
-      bc.send_command(BettercapCommand::SubscribeEvents { respond_to: bc_tx })
-        .await;
+      bc.send_command(BettercapCommand::SubscribeEvents { respond_to: bc_tx }).await;
 
       let Ok(mut bettercap_rx) = bc_rx.await else {
         LOGGER.log_error("Agent", "Bettercap broadcast request failed");
@@ -27,6 +26,7 @@ pub fn start_event_loop(agent: &Arc<AgentHandle>, bc: &Arc<BettercapHandle>) {
 
       while let Ok(msg) = bettercap_rx.recv().await {
         LOGGER.log_debug("Agent", &format!("Received Bettercap event: {msg}"));
+
         if tx.send(msg).await.is_err() {
           LOGGER.log_error("Agent", "Agent inbox dropped, stopping event forwarder");
           break;

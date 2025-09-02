@@ -1,8 +1,5 @@
-use crate::core::{
-  config::config,
-  log::LOGGER,
-  ui::old::web::routes::{inbox_handler, index_handler, ui},
-};
+use std::{borrow::Cow, sync::Arc};
+
 use axum::{
   Router,
   extract::Path,
@@ -11,44 +8,47 @@ use axum::{
   routing::get,
 };
 use include_dir::{Dir, include_dir};
-use std::sync::Arc;
 use tera::Tera;
+
+use crate::core::{
+  config::config,
+  log::LOGGER,
+  ui::old::web::routes::{inbox_handler, index_handler, ui},
+};
 
 pub static TEMPLATE_ASSETS: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/assets/templates");
 pub static STATIC_ASSETS: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/assets/static");
 
 pub struct Server {
-  pub address: String,
+  pub address: Cow<'static, str>,
   pub port: u16,
 }
 
 impl Default for Server {
   fn default() -> Self {
-    let address = config().ui.web.address.clone();
+    let address = &config().ui.web.address;
     let port = config().ui.web.port;
-    Self { address, port }
+    Self { address: Cow::Borrowed(address), port }
   }
 }
 
 impl Server {
   pub fn new() -> Self {
     Self {
-      address: config().ui.web.address.clone(),
+      address: Cow::Borrowed(&config().ui.web.address),
       port: config().ui.web.port,
     }
   }
 
   pub fn start(&self) {
     if self.address.is_empty() {
-      LOGGER.log_info(
-        "Server",
-        "Couldn't get IP of USB0, video server not starting",
-      );
+      LOGGER.log_info("Server", "Couldn't get IP of USB0, video server not starting");
     } else {
       let addr = format!("{}:{}", self.address, self.port);
 
       tokio::spawn(async move {
         let tera = Arc::new(build_tera_from_include_dir());
+
         let app = build_router(tera);
 
         match tokio::net::TcpListener::bind(&addr).await {
@@ -84,16 +84,13 @@ pub fn build_router(tera: Arc<Tera>) -> Router {
 
 pub async fn static_handler(Path(path): Path<String>) -> Response {
   // allow /index.html etc.
-  let path = if path.is_empty() {
-    "index.html"
-  } else {
-    path.as_str()
-  };
+  let path = if path.is_empty() { "index.html" } else { path.as_str() };
 
   STATIC_ASSETS.get_file(path).map_or_else(
     || (StatusCode::NOT_FOUND, format!("File not found: {path}")).into_response(),
     |file| {
       let mime = mime_guess::from_path(path).first_or_octet_stream();
+
       Response::builder()
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, mime.as_ref())
@@ -109,8 +106,10 @@ fn build_tera_from_include_dir() -> Tera {
   for file in TEMPLATE_ASSETS.files() {
     let Some(path) = file.path().to_str() else {
       eprintln!("Failed to convert path to str");
+
       continue;
     };
+
     if let Ok(contents) = std::str::from_utf8(file.contents()) {
       templates.push((path, contents.to_string()));
     } else {
@@ -119,8 +118,10 @@ fn build_tera_from_include_dir() -> Tera {
   }
 
   let mut tera = Tera::default();
+
   tera.add_raw_templates(templates).unwrap_or_else(|e| {
     eprintln!("Failed to add templates to Tera: {e}");
   });
+
   tera
 }

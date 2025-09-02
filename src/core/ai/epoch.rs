@@ -3,18 +3,22 @@
   clippy::cast_precision_loss,
   clippy::struct_excessive_bools
 )]
+
+use std::{
+  collections::HashMap,
+  mem::take,
+  time::{Duration, Instant},
+  vec,
+};
+
+use tokio::sync::mpsc::{Receiver, Sender, channel};
+
 use crate::core::{
   ai::reward::RewardFunction,
   config::config,
   mesh::wifi,
   models::net::{AccessPoint, Peer},
 };
-use std::{
-  collections::HashMap,
-  time::{Duration, Instant},
-  vec,
-};
-use tokio::sync::mpsc::{Receiver, Sender, channel};
 
 pub struct Epoch {
   obs_tx: Sender<Observation>,
@@ -53,6 +57,7 @@ pub struct Epoch {
 }
 
 #[derive(Clone)]
+
 pub struct EpochData {
   pub duration_secs: f64,
   pub slept_for_secs: f64,
@@ -164,6 +169,7 @@ impl Epoch {
 
   pub fn observe(&mut self, aps: &Vec<AccessPoint>, peers: &Vec<Peer>) {
     let num_aps = aps.len();
+
     if num_aps == 0 {
       self.blind_for += 1;
     } else {
@@ -171,31 +177,22 @@ impl Epoch {
     }
 
     let bond_unit_scale = config().personality.bond_encounters_factor;
-    self.num_peers = peers.len().try_into().unwrap_or(0);
 
+    self.num_peers = peers.len().try_into().unwrap_or(0);
     self.total_bond_factor = aps
       .iter()
       .map(|ap| {
         #[allow(clippy::cast_possible_truncation)]
         let bond_factor = (f64::from(ap.rssi) / f64::from(bond_unit_scale)) as f32;
+
         if bond_factor < 0.0 { 0.0 } else { bond_factor }
       })
       .sum::<f32>();
-    self.avg_bond_factor = if num_aps > 0 {
-      self.total_bond_factor / num_aps as f32
-    } else {
-      0.0
-    };
+    self.avg_bond_factor = if num_aps > 0 { self.total_bond_factor / num_aps as f32 } else { 0.0 };
 
     #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
     let num_aps_f = (aps.len() as f64) as f32 + 1e-10;
-
-    let num_sta = aps
-      .iter()
-      .map(|ap| ap.clients.len() as u32 as f32)
-      .sum::<f32>()
-      / num_aps_f;
-
+    let num_sta = aps.iter().map(|ap| ap.clients.len() as u32 as f32).sum::<f32>() / num_aps_f;
     let num_channels = usize::try_from(wifi::NUM_CHANNELS).unwrap_or(0);
     let mut aps_per_chan = vec![0.0; num_channels];
     let mut sta_per_chan = vec![0.0; num_channels];
@@ -226,7 +223,8 @@ impl Epoch {
       sta: sta_per_chan,
       peers: peers_per_chan,
     };
-    let _ = self.obs_tx.try_send(self.observation.clone());
+
+    let _ = self.obs_tx.try_send(take(&mut self.observation));
   }
 
   pub fn next(&mut self) {
@@ -275,7 +273,7 @@ impl Epoch {
       temperature: 0.0,
     };
 
-    self.data_tx.try_send(self.epoch_data.clone()).ok();
+    self.data_tx.try_send(take(&mut self.epoch_data)).ok();
 
     self.epoch += 1;
     self.epoch_start = Instant::now();

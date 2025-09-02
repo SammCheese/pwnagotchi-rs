@@ -1,9 +1,11 @@
+use std::sync::Arc;
+
 use image::RgbaImage;
 
 use crate::core::{config::config, ui::old::hw::waveshare2in13b_v4::Waveshare2in13bV4};
 
 pub trait DisplayTrait: Send + Sync {
-  fn layout(&mut self) -> &Layout;
+  fn layout(&self) -> &Layout;
   fn initialize(&self);
   fn render(&self, canvas: &mut RgbaImage);
   fn clear(&self);
@@ -44,7 +46,7 @@ impl Default for DisplayImpl {
   fn default() -> Self {
     Self {
       display: None,
-      name: config().main.name.clone(),
+      name: config().main.name.to_string(),
       layout: Layout {
         width: 0,
         height: 0,
@@ -59,10 +61,7 @@ impl Default for DisplayImpl {
         friend_name: (0, 0),
         shakes: (0, 0),
         mode: (0, 0),
-        status: Status {
-          pos: (0, 0),
-          max: 40,
-        },
+        status: Status { pos: (0, 0), max: 40 },
       },
     }
   }
@@ -84,24 +83,24 @@ impl Default for Layout {
       friend_name: (0, 0),
       shakes: (0, 0),
       mode: (0, 0),
-      status: Status {
-        pos: (0, 0),
-        max: 40,
-      },
+      status: Status { pos: (0, 0), max: 40 },
     }
   }
 }
 
 impl DisplayTrait for DisplayImpl {
-  fn layout(&mut self) -> &Layout {
+  fn layout(&self) -> &Layout {
     &self.layout
   }
+
   fn initialize(&self) {
     println!("Not Implemented");
   }
+
   fn render(&self, _canvas: &mut RgbaImage) {
     println!("Not Implemented");
   }
+
   fn clear(&self) {
     println!("Not Implemented");
   }
@@ -113,9 +112,9 @@ impl DisplayImpl {
   }
 }
 
-pub fn get_display_from_config() -> Box<dyn DisplayTrait> {
+pub fn get_display_from_config() -> Arc<dyn DisplayTrait + Send + Sync> {
   match config().ui.display.r#type.as_str() {
-    "waveshare_v4" => Box::new(Waveshare2in13bV4::new()),
-    _ => Box::new(DisplayImpl::default_fallback()),
+    "waveshare_v4" => Arc::new(Waveshare2in13bV4::new()),
+    _ => Arc::new(DisplayImpl::default_fallback()),
   }
 }

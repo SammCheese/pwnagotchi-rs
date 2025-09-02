@@ -1,15 +1,17 @@
+use std::borrow::Cow;
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(default)]
 pub struct IdentityConfig {
-  pub path: String,
+  pub path: Cow<'static, str>,
 }
 
 impl Default for IdentityConfig {
   fn default() -> Self {
     Self {
-      path: "/etc/.ssh/pwnagotchi/".to_owned(),
+      path: Cow::Borrowed("/etc/.ssh/pwnagotchi/"),
     }
   }
 }

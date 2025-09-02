@@ -1,11 +1,13 @@
+use std::fmt::Write;
+
 use crate::core::{
   models::net::{AccessPoint, Station},
   session::LastSession,
   utils::{STAP, hostname_or_mac, random_choice},
 };
-use std::fmt::Write;
 
 #[derive(Debug, Clone)]
+
 pub struct Voice {}
 
 impl Default for Voice {
@@ -97,7 +99,11 @@ impl Voice {
   }
 
   pub fn on_angry(&self) -> String {
-    random_choice(&["I'm mad at you!", "Leave me alone...", "..."])
+    random_choice(&[
+      "I'm mad at you!",
+      "Leave me alone...",
+      "...",
+    ])
   }
 
   pub fn on_excited(&self) -> String {
@@ -139,7 +145,10 @@ impl Voice {
   }
 
   pub fn on_grateful(&self) -> String {
-    random_choice(&["Good friends are a blessing!", "I love my friends!"])
+    random_choice(&[
+      "Good friends are a blessing!",
+      "I love my friends!",
+    ])
   }
 
   pub fn on_lonely(&self) -> String {
@@ -165,7 +174,12 @@ impl Voice {
   }
 
   pub fn on_awakening(&self) -> String {
-    random_choice(&["...", "!", "Hello World!", "I dreamed of electric sheep."])
+    random_choice(&[
+      "...",
+      "!",
+      "Hello World!",
+      "I dreamed of electric sheep.",
+    ])
   }
 
   pub fn on_waiting(&self, secs: u64) -> String {
@@ -177,7 +191,8 @@ impl Voice {
   }
 
   pub fn on_assoc(&self, ap: &AccessPoint) -> String {
-    let what = hostname_or_mac(&STAP::AccessPoint(ap.clone()));
+    let binding = STAP::AccessPoint(ap);
+    let what = hostname_or_mac(&binding);
 
     random_choice(&[
       format!("Hey {what} let's be friends!"),
@@ -188,7 +203,9 @@ impl Voice {
   }
 
   pub fn on_deauth(&self, sta: &Station) -> String {
-    let who = hostname_or_mac(&STAP::Station(sta.clone()));
+    let binding = STAP::Station(sta);
+    let who = hostname_or_mac(&binding);
+
     random_choice(&[
       format!("Just decided that {who} needs no Wi-Fi!"),
       format!("Deauthenticating {who}!"),
@@ -197,16 +214,14 @@ impl Voice {
   }
 
   pub fn on_handshakes(&self, num_shakes: u32) -> String {
-    let s = if num_shakes == 1 {
-      "handshake"
-    } else {
-      "handshakes"
-    };
+    let s = if num_shakes == 1 { "handshake" } else { "handshakes" };
+
     format!("Cool, we got {num_shakes} new {s}!")
   }
 
   pub fn on_unread_messages(&self, count: u32) -> String {
     let s = if count == 1 { "message" } else { "messages" };
+
     format!("You have {count} new {s}")
   }
 
@@ -230,6 +245,7 @@ impl Voice {
 
   pub fn on_last_session_data(&self, last_session: &LastSession) -> String {
     let mut status = format!("kicked {} stations\n", last_session.deauthed);
+
     if last_session.associated > 999 {
       let _ = writeln!(status, " Made > 999 new friends");
     } else {

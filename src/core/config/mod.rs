@@ -1,4 +1,5 @@
 #![allow(clippy::missing_errors_doc)]
+
 mod bettercap;
 mod faces;
 mod fs;
@@ -8,6 +9,8 @@ mod personality;
 mod plugins;
 mod ui;
 
+use std::{collections::HashMap, fmt::Display, path::Path, sync::OnceLock};
+
 pub use bettercap::BettercapConfig;
 pub use faces::FaceConfig;
 pub use fs::FSConfig;
@@ -15,12 +18,8 @@ pub use identity::IdentityConfig;
 pub use main::MainConfig;
 pub use personality::PersonalityConfig;
 pub use plugins::PluginConfig;
-pub use ui::UIConfig;
-
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, fmt::Display, path::Path};
-
-use std::sync::OnceLock;
+pub use ui::UIConfig;
 
 #[derive(Debug, Deserialize, Serialize, Clone, Default)]
 #[serde(default)]

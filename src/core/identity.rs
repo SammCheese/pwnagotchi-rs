@@ -1,3 +1,8 @@
+use std::{
+  path,
+  process::{Command, exit},
+};
+
 use base64::{Engine, engine::general_purpose};
 use crypto::digest::Digest;
 use nix::libc::EXIT_FAILURE;
@@ -8,8 +13,6 @@ use rsa::{
   traits::SignatureScheme,
 };
 use sha2::Sha256;
-use std::process::Command;
-use std::{path, process::exit};
 
 use crate::core::{config::config, log::LOGGER};
 
@@ -27,7 +30,7 @@ pub struct Identity {
 
 impl Default for Identity {
   fn default() -> Self {
-    let path = config().identity.path.clone();
+    let path = config().identity.path.to_string();
     let priv_path = format!("{path}id_rsa");
     let pub_path = format!("{priv_path}.pub");
     let fingerprint_path = format!("{path}fingerprint");
@@ -49,7 +52,7 @@ impl Default for Identity {
 
 impl Identity {
   pub fn new() -> Self {
-    let path = config().identity.path.clone();
+    let path = config().identity.path.to_string();
     let priv_path = format!("{path}id_rsa");
     let pub_path = format!("{priv_path}.pub");
     let fingerprint_path = format!("{path}fingerprint");
@@ -64,6 +67,7 @@ impl Identity {
       pubkey_pem_b64: None,
       fingerprint: None,
     };
+
     ident.initialize();
     ident
   }
@@ -76,6 +80,7 @@ impl Identity {
         "IDENTITY",
         &format!("Failed to create identity directory {:?}: {e}", &self.path),
       );
+
       exit(EXIT_FAILURE);
     }
 
@@ -85,29 +90,22 @@ impl Identity {
           break;
         }
         Err(e) => {
-          LOGGER.log_error(
-            "IDENTITY",
-            &format!("Key load failed: {e}. Regenerating..."),
-          );
-          let _ = Command::new("pwngrid")
-            .arg("-generate")
-            .arg("-keys")
-            .arg(&self.path)
-            .status();
+          LOGGER.log_error("IDENTITY", &format!("Key load failed: {e}. Regenerating..."));
+
+          let _ = Command::new("pwngrid").arg("-generate").arg("-keys").arg(&self.path).status();
         }
       }
+
       if self.priv_key.is_some() && self.pub_key.is_some() {
         break;
       }
+
       std::thread::sleep(std::time::Duration::from_secs(5));
     }
   }
 
-  pub fn fingerprint(&self) -> String {
-    self
-      .fingerprint
-      .clone()
-      .unwrap_or_else(|| "unknown".to_string())
+  pub fn fingerprint(&self) -> &str {
+    self.fingerprint.as_deref().unwrap_or("unknown")
   }
 
   fn try_load_keys(&mut self) -> Result<(), Box<dyn std::error::Error>> {
@@ -123,6 +121,7 @@ impl Identity {
     self.pubkey_pem_b64 = Some(general_purpose::STANDARD.encode(pem_bytes));
 
     let hash = Sha256::digest(pem_bytes);
+
     self.fingerprint = Some(hex::encode(hash));
 
     if let Some(fingerprint) = &self.fingerprint {
@@ -134,10 +133,12 @@ impl Identity {
     Ok(())
   }
 
-  /// Signs a message using the loaded private key and returns the signature as a base64 string.
+  /// Signs a message using the loaded private key and returns the signature as
+  /// a base64 string.
   ///
   /// # Errors
-  /// Returns an error if the private key is not loaded or if the signing operation fails.
+  /// Returns an error if the private key is not loaded or if the signing
+  /// operation fails.
   pub fn sign(&self, message: &str) -> Result<String, String> {
     let key = self.priv_key.as_ref().ok_or("Private key not loaded")?;
 
@@ -148,6 +149,7 @@ impl Identity {
       .map_err(|e| format!("Signing failed: {e}"))?;
 
     let signature_b64 = general_purpose::STANDARD.encode(&signature);
+
     Ok(signature_b64)
   }
 }

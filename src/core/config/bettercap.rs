@@ -1,25 +1,27 @@
+use std::borrow::Cow;
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(default)]
 pub struct BettercapConfig {
-  pub hostname: String,
+  pub hostname: Cow<'static, str>,
   pub port: u16,
-  pub username: String,
-  pub password: String,
-  pub silence: Vec<String>,
-  pub handshakes: String,
+  pub username: Cow<'static, str>,
+  pub password: Cow<'static, str>,
+  pub silence: Vec<Cow<'static, str>>,
+  pub handshakes: Cow<'static, str>,
 }
 
 impl Default for BettercapConfig {
   fn default() -> Self {
     Self {
-      hostname: "localhost".into(),
+      hostname: Cow::Borrowed("localhost"),
       port: 8081,
-      username: "user".into(),
-      password: "pass".into(),
+      username: Cow::Borrowed("user"),
+      password: Cow::Borrowed("pass"),
       silence: Vec::new(),
-      handshakes: "handshakes".into(),
+      handshakes: Cow::Borrowed("handshakes"),
     }
   }
 }

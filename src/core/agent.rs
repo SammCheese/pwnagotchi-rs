@@ -1,22 +1,28 @@
-use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
-use std::sync::Arc;
-use std::{collections::HashMap, fs, time::Duration};
-use tokio::time::sleep as a_sleep;
+use std::{
+  collections::{HashMap, HashSet},
+  fs,
+  sync::Arc,
+  time::Duration,
+};
 
-use crate::core::bettercap::{BettercapCommand, BettercapHandle};
-use crate::core::config::config;
-use crate::core::models::net::{AccessPoint, Handshake, Peer, Station};
-use crate::core::session::LastSession;
-use crate::core::ui::state::StateValue;
+use serde::{Deserialize, Serialize};
+
 use crate::core::{
   automata::Automata,
+  bettercap::{BettercapCommand, BettercapHandle},
+  config::config,
   log::LOGGER,
-  models::bettercap::BettercapSession,
+  models::{
+    bettercap::BettercapSession,
+    net::{AccessPoint, Handshake, Peer, Station},
+  },
+  session::LastSession,
+  ui::state::StateValue,
   utils::{self},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+
 pub enum RunningMode {
   Auto,
   Manual,
@@ -25,6 +31,7 @@ pub enum RunningMode {
 }
 
 const WIFI_RECON: &str = "wifi.recon";
+
 const RECOVERY_FILE: &str = "/root/.pwnagotchi-recovery";
 
 pub struct Agent {
@@ -46,6 +53,7 @@ pub struct Agent {
 }
 
 #[derive(Deserialize, Serialize, Debug)]
+
 pub struct Event {
   pub event_type: String,
   pub data: HashMap<String, String>,
@@ -54,6 +62,7 @@ pub struct Event {
 impl Agent {
   pub fn new(bc: Arc<BettercapHandle>) -> Self {
     Self::initialize();
+
     Self {
       automata: Automata::new(),
       bettercap: bc,
@@ -74,8 +83,7 @@ impl Agent {
 
   fn initialize() {
     LOGGER.log_info("Agent", "Initializing Agent");
-
-    let handshakes_path = &config().main.handshakes_path;
+    let handshakes_path = &config().main.handshakes_path.as_ref();
     if fs::metadata(handshakes_path).is_err()
       && let Err(e) = fs::create_dir_all(handshakes_path)
     {
@@ -85,74 +93,49 @@ impl Agent {
 
   pub async fn setup_events(&mut self) {
     LOGGER.log_debug("Agent", "Setting up Bettercap events...");
+
     for event in &config().bettercap.silence {
       let (tx, rx) = tokio::sync::oneshot::channel();
       self
         .bettercap
-        .send_command(BettercapCommand::Run {
-          args: vec![
-            "set".to_string(),
-            "events.ignore".to_string(),
-            event.clone(),
-          ],
-          respond_to: tx,
-        })
+        .send_command(BettercapCommand::run(format!("set events.ignore {event};"), tx))
         .await;
 
       if let Err(e) = rx.await {
-        LOGGER.log_error(
-          "Agent",
-          &format!("Failed to set events.ignore for {event}: {e}"),
-        );
+        LOGGER.log_error("Agent", &format!("Failed to set events.ignore for {event}: {e}"));
       }
     }
   }
 
   pub async fn reset_wifi_settings(&self) {
-    let interface = config().main.interface.clone();
+    let interface = &config().main.interface;
     let ap_ttl = format!("{}", config().personality.ap_ttl);
     let sta_ttl = format!("{}", config().personality.sta_ttl);
     let min_rssi = format!("{}", config().personality.min_rssi);
-
     let (ap_tx, ap_rx) = tokio::sync::oneshot::channel();
     let (sta_tx, sta_rx) = tokio::sync::oneshot::channel();
-
     let (tx, rx) = tokio::sync::oneshot::channel();
+
     self
       .bettercap
-      .send_command(BettercapCommand::Run {
-        args: vec![
-          "set".to_string(),
-          "wifi.interface".to_string(),
-          interface.clone(),
-        ],
-        respond_to: tx,
-      })
+      .send_command(BettercapCommand::run(format!("set wifi.interface {interface};"), tx))
       .await;
+
     if let Err(e) = rx.await {
       LOGGER.log_error("Agent", &format!("Failed to set wifi.interface: {e}"));
     }
 
     self
       .bettercap
-      .send_command(BettercapCommand::Run {
-        args: vec!["set".to_string(), "wifi.ap.ttl".to_string(), ap_ttl.clone()],
-        respond_to: ap_tx,
-      })
+      .send_command(BettercapCommand::run(format!("set wifi.ap.ttl {ap_ttl};"), ap_tx))
       .await;
     if let Err(e) = ap_rx.await {
       LOGGER.log_error("Agent", &format!("Failed to set wifi.ap.ttl: {e}"));
     }
+
     self
       .bettercap
-      .send_command(BettercapCommand::Run {
-        args: vec![
-          "set".to_string(),
-          "wifi.sta.ttl".to_string(),
-          sta_ttl.clone(),
-        ],
-        respond_to: sta_tx,
-      })
+      .send_command(BettercapCommand::run(format!("set wifi.sta.ttl {sta_ttl};"), sta_tx))
       .await;
     if let Err(e) = sta_rx.await {
       LOGGER.log_error("Agent", &format!("Failed to set wifi.sta.ttl: {e}"));
@@ -161,59 +144,36 @@ impl Agent {
     let (tx, rx) = tokio::sync::oneshot::channel();
     self
       .bettercap
-      .send_command(BettercapCommand::Run {
-        args: vec![
-          "set".to_string(),
-          "wifi.rssi.min".to_string(),
-          min_rssi.clone(),
-        ],
-        respond_to: tx,
-      })
+      .send_command(BettercapCommand::run(format!("set wifi.rssi.min {min_rssi};"), tx))
       .await;
     if let Err(e) = rx.await {
       LOGGER.log_error("Agent", &format!("Failed to set wifi.rssi.min: {e}"));
     }
 
     let (tx, rx) = tokio::sync::oneshot::channel();
-    let path = config().main.handshakes_path.clone();
+    let path = &config().main.handshakes_path;
     self
       .bettercap
-      .send_command(BettercapCommand::Run {
-        args: vec![
-          "set".to_string(),
-          "wifi.handshakes.file".to_string(),
-          path.clone(),
-        ],
-        respond_to: tx,
-      })
+      .send_command(BettercapCommand::run(format!("set wifi.handshakes.file {path};"), tx))
       .await;
     if let Err(e) = rx.await {
       LOGGER.log_error("Agent", &format!("Failed to set wifi.handshakes.file: {e}"));
     }
+
     let (tx, rx) = tokio::sync::oneshot::channel();
     self
       .bettercap
-      .send_command(BettercapCommand::Run {
-        args: vec![
-          "set".to_string(),
-          "wifi.handshakes.aggregate".to_string(),
-          "false".to_string(),
-        ],
-        respond_to: tx,
-      })
+      .send_command(BettercapCommand::run("set wifi.handshakes.aggregate false;", tx))
       .await;
     if let Err(e) = rx.await {
-      LOGGER.log_error(
-        "Agent",
-        &format!("Failed to set wifi.handshakes.aggregate: {e}"),
-      );
+      LOGGER.log_error("Agent", &format!("Failed to set wifi.handshakes.aggregate: {e}"));
     }
   }
 
   pub async fn start_monitor_mode(&mut self) {
     let interface = &config().main.interface;
     let mon_start_cmd = &config().main.mon_start_cmd;
-    let no_restart = config().main.no_restart;
+    let no_restart = &config().main.no_restart;
     let mut is_starting = false;
     let mut has_iface = false;
 
@@ -234,39 +194,30 @@ impl Agent {
         }
 
         if !is_starting && !mon_start_cmd.trim().is_empty() {
-          let cmd = mon_start_cmd.clone();
-          let status = tokio::process::Command::new("sh")
-            .arg("-c")
-            .arg(&cmd)
-            .status()
-            .await;
+          let cmd = mon_start_cmd.as_ref();
+          let status = tokio::process::Command::new("sh").arg("-c").arg(cmd).status().await;
+
           match status {
             Ok(status) if status.success() => {
               LOGGER.log_info("Agent", "Monitor mode command executed successfully");
             }
             Ok(status) => {
-              LOGGER.log_error(
-                "Agent",
-                &format!("Monitor mode command failed with status: {status}"),
-              );
+              LOGGER
+                .log_error("Agent", &format!("Monitor mode command failed with status: {status}"));
             }
             Err(e) => {
               LOGGER.log_error("Agent", &format!("Failed to run monitor mode command: {e}"));
             }
           }
         }
+
         if !has_iface && !is_starting {
           is_starting = true;
-          LOGGER.log_info(
-            "Agent",
-            &format!("Waiting for interface {interface} to appear..."),
-          );
+
+          LOGGER.log_info("Agent", &format!("Waiting for interface {interface} to appear..."));
         }
       } else {
-        LOGGER.log_warning(
-          "Agent",
-          "Bettercap session not available, cannot check interfaces",
-        );
+        LOGGER.log_warning("Agent", "Bettercap session not available, cannot check interfaces");
       }
       tokio::time::sleep(Duration::from_secs(5)).await;
     }
@@ -276,19 +227,13 @@ impl Agent {
     let wifi_running = self.is_module_running("wifi").await;
 
     // Ensure the device is ready
-    tokio::time::sleep(Duration::from_secs(2)).await;
+    tokio::time::sleep(Duration::from_secs(1)).await;
 
     if wifi_running && !no_restart {
       LOGGER.log_debug("Agent", "Restarting WiFi module...");
       self.restart_module(WIFI_RECON).await;
       let (tx, rx) = tokio::sync::oneshot::channel();
-      self
-        .bettercap
-        .send_command(BettercapCommand::Run {
-          args: vec!["wifi.clear".to_string()],
-          respond_to: tx,
-        })
-        .await;
+      self.bettercap.send_command(BettercapCommand::run("wifi.clear", tx)).await;
       if let Err(e) = rx.await {
         LOGGER.log_error("Agent", &format!("Failed to clear wifi: {e}"));
       }
@@ -308,6 +253,7 @@ impl Agent {
         .bettercap
         .send_command(BettercapCommand::GetSession { respond_to: tx })
         .await;
+
       if let Ok(Some(_session)) = rx.await {
         tokio::time::sleep(Duration::from_secs(1)).await;
         return;
@@ -322,7 +268,6 @@ impl Agent {
     self.setup_events().await;
     self.automata.set_starting();
     self.start_monitor_mode().await;
-
     self.automata.next_epoch();
     self.automata.set_ready();
   }
@@ -336,30 +281,19 @@ impl Agent {
 
   pub fn set_mode(&mut self, mode: RunningMode) {
     self.mode = mode;
+
     match self.mode {
       RunningMode::Auto => {
-        self
-          .automata
-          .view
-          .set("mode", StateValue::Text("auto".into()));
+        self.automata.view.set("mode", StateValue::Text("auto".into()));
       }
       RunningMode::Manual => {
-        self
-          .automata
-          .view
-          .set("mode", StateValue::Text("manual".into()));
+        self.automata.view.set("mode", StateValue::Text("manual".into()));
       }
       RunningMode::Ai => {
-        self
-          .automata
-          .view
-          .set("mode", StateValue::Text("ai".into()));
+        self.automata.view.set("mode", StateValue::Text("ai".into()));
       }
       RunningMode::Custom => {
-        self
-          .automata
-          .view
-          .set("mode", StateValue::Text("custom".into()));
+        self.automata.view.set("mode", StateValue::Text("custom".into()));
       }
     }
   }
@@ -388,14 +322,12 @@ impl Agent {
       }
     }
 
-    LOGGER.log_debug(
-      "Agent",
-      &format!("Found {} populated channels", grouped.len()),
-    );
+    LOGGER.log_debug("Agent", &format!("Found {} populated channels", grouped.len()));
 
     let mut grouped_vec: Vec<(u8, Vec<AccessPoint>)> = grouped.into_iter().collect();
 
-    // Sort by population (descending), stable so channels with same count keep numeric order
+    // Sort by population (descending), stable so channels with same count keep
+    // numeric order
     grouped_vec.sort_by(|a, b| b.1.len().cmp(&a.1.len()).then_with(|| a.0.cmp(&b.0)));
 
     grouped_vec
@@ -412,10 +344,7 @@ impl Agent {
     }
 
     LOGGER.log_debug("RECON", "Starting Recon");
-    self
-      .automata
-      .view
-      .set("channel", StateValue::Text("*".into()));
+    self.automata.view.set("channel", StateValue::Text("*".into()));
 
     if channels.is_empty() {
       self.current_channel = 0;
@@ -423,10 +352,7 @@ impl Agent {
       let (tx, rx) = tokio::sync::oneshot::channel();
       self
         .bettercap
-        .send_command(BettercapCommand::Run {
-          args: vec!["wifi.recon.channel".to_string(), "clear".to_string()],
-          respond_to: tx,
-        })
+        .send_command(BettercapCommand::run("wifi.recon.channel clear;", tx))
         .await;
       if let Err(_e) = rx.await {
         LOGGER.log_error("RECON", "Failed to set channels");
@@ -439,13 +365,12 @@ impl Agent {
         .into_iter()
         .collect::<Vec<_>>()
         .join(",");
+
       let (tx, rx) = tokio::sync::oneshot::channel();
+
       self
         .bettercap
-        .send_command(BettercapCommand::Run {
-          args: vec!["wifi.recon.channel".to_string(), channel_str],
-          respond_to: tx,
-        })
+        .send_command(BettercapCommand::run(format!("wifi.recon.channel {channel_str};"), tx))
         .await;
       if let Err(e) = rx.await {
         LOGGER.log_error("RECON", &format!("Failed to set recon channel: {e}"));
@@ -453,17 +378,12 @@ impl Agent {
     }
 
     LOGGER.log_debug("RECON", &format!("Recon time set to {recon_time} seconds"));
-
     self.automata.wait_for(recon_time, Some(false)).await;
   }
 
-  #[allow(clippy::future_not_send)]
   pub async fn associate(&mut self, ap: &AccessPoint, mut throttle: Option<f32>) {
     if self.automata.is_stale() {
-      LOGGER.log_debug(
-        "AGENT",
-        &format!("Recon is stale, skipping association to {}", ap.mac),
-      );
+      LOGGER.log_debug("AGENT", &format!("Recon is stale, skipping association to {}", ap.mac));
       return;
     }
 
@@ -486,14 +406,12 @@ impl Agent {
         ),
       );
 
-      let mac = ap.mac.clone();
+      let mac = &ap.mac;
+
       let (tx, rx) = tokio::sync::oneshot::channel();
       self
         .bettercap
-        .send_command(BettercapCommand::Run {
-          args: vec!["wifi.assoc".to_string(), mac],
-          respond_to: tx,
-        })
+        .send_command(BettercapCommand::run(format!("wifi.assoc {mac};"), tx))
         .await;
 
       match rx.await {
@@ -501,11 +419,9 @@ impl Agent {
           Ok(()) => {
             LOGGER.log_info(
               "AGENT",
-              &format!(
-                "Associated with {} ({}) on channel {}",
-                ap.mac, ap.hostname, ap.channel
-              ),
+              &format!("Associated with {} ({}) on channel {}", ap.mac, ap.hostname, ap.channel),
             );
+
             self.automata.epoch.track("association", Some(1));
           }
           Err(e) => {
@@ -518,22 +434,17 @@ impl Agent {
       }
 
       if let Some(throttle) = throttle {
-        LOGGER.log_debug(
-          "AGENT",
-          &format!("Throttling association for {throttle} seconds"),
-        );
-        a_sleep(Duration::from_secs_f32(throttle)).await;
+        LOGGER.log_debug("AGENT", &format!("Throttling association for {throttle} seconds"));
+        tokio::time::sleep(Duration::from_secs_f32(throttle)).await;
       }
+
       self.automata.view.on_normal();
     }
   }
 
   pub async fn deauth(&mut self, ap: &AccessPoint, sta: &Station, mut throttle: Option<f32>) {
     if self.automata.is_stale() {
-      LOGGER.log_debug(
-        "AGENT",
-        &format!("Recon is stale, skipping deauth {}", sta.mac),
-      );
+      LOGGER.log_debug("AGENT", &format!("Recon is stale, skipping deauth {}", sta.mac));
       return;
     }
 
@@ -556,14 +467,12 @@ impl Agent {
         ),
       );
 
-      let mac = sta.mac.clone();
+      let mac = &sta.mac;
       let (tx, rx) = tokio::sync::oneshot::channel();
+
       self
         .bettercap
-        .send_command(BettercapCommand::Run {
-          args: vec!["wifi.deauth".to_string(), mac],
-          respond_to: tx,
-        })
+        .send_command(BettercapCommand::run(format!("wifi.deauth {mac};"), tx))
         .await;
 
       match rx.await {
@@ -576,6 +485,7 @@ impl Agent {
                 sta.mac, ap.hostname, ap.channel
               ),
             );
+
             self.automata.epoch.track("deauth", Some(1));
           }
           Err(e) => {
@@ -588,10 +498,7 @@ impl Agent {
       }
 
       if let Some(throttle) = throttle {
-        LOGGER.log_debug(
-          "AGENT",
-          &format!("Throttling deauth for {throttle} seconds"),
-        );
+        LOGGER.log_debug("AGENT", &format!("Throttling deauth for {throttle} seconds"));
         tokio::time::sleep(Duration::from_secs_f32(throttle)).await;
       }
 
@@ -620,33 +527,24 @@ impl Agent {
       e.insert(1);
       return true;
     }
+
     self.history.entry(bssid.to_string()).and_modify(|e| {
       *e += 1;
     });
+
     self.history[&bssid.to_string()] < config().personality.max_interactions
   }
 
-  pub fn set_access_points(&mut self, aps: Vec<AccessPoint>) -> std::vec::Vec<AccessPoint> {
-    self.access_points = aps;
-    self
-      .automata
-      .epoch
-      .observe(&self.access_points, &self.peers);
-    self.access_points.clone()
+  pub fn set_access_points(&mut self, aps: &[AccessPoint]) {
+    self.access_points = aps.to_vec();
+    self.automata.epoch.observe(&self.access_points, &self.peers);
   }
 
   pub async fn get_access_points(&mut self) -> Vec<AccessPoint> {
-    let blacklist: Vec<String> = config()
-      .main
-      .whitelist
-      .iter()
-      .map(|s| s.to_lowercase())
-      .collect();
-
+    let blacklist: Vec<String> = config().main.whitelist.iter().map(|s| s.to_lowercase()).collect();
     let mut aps: Vec<AccessPoint> = Vec::new();
 
     let (tx, rx) = tokio::sync::oneshot::channel();
-
     self
       .bettercap
       .send_command(BettercapCommand::GetSession { respond_to: tx })
@@ -673,7 +571,7 @@ impl Agent {
 
     aps.sort_by_key(|ap| ap.channel);
 
-    self.set_access_points(aps.clone());
+    self.set_access_points(&aps);
 
     aps
   }
@@ -683,12 +581,7 @@ impl Agent {
   }
 
   pub fn get_aps_on_channel(&self, channel: u8) -> Vec<AccessPoint> {
-    self
-      .access_points
-      .iter()
-      .filter(|ap| ap.channel == channel)
-      .cloned()
-      .collect()
+    self.access_points.iter().filter(|ap| ap.channel == channel).cloned().collect()
   }
 
   pub fn update_handshakes(&mut self, new_shakes: u32) {
@@ -705,73 +598,52 @@ impl Agent {
     }
   }
 
-  #[allow(clippy::future_not_send)]
   pub async fn is_module_running(&self, module: &str) -> bool {
     let (tx, rx) = tokio::sync::oneshot::channel();
-
     self
       .bettercap
       .send_command(BettercapCommand::GetSession { respond_to: tx })
       .await;
 
     match rx.await {
-      Ok(Some(session)) => session
-        .modules
-        .iter()
-        .any(|m| m.name == module && m.running),
+      Ok(Some(session)) => session.modules.iter().any(|m| m.name == module && m.running),
       _ => false,
     }
   }
 
-  pub fn find_ap_sta_in(
+  pub fn find_ap_sta_in<'a>(
     sta_mac: &str,
     ap_mac: &str,
-    session: Option<BettercapSession>,
-  ) -> Option<(AccessPoint, Station)> {
-    if let Some(session) = session {
-      for ap in &session.wifi.aps {
-        if ap.mac == ap_mac {
-          for sta in &ap.clients {
-            if sta.mac == sta_mac {
-              return Some((ap.clone(), sta.clone()));
-            }
-          }
-        }
-      }
-    }
-    None
+    session: Option<&'a BettercapSession>,
+  ) -> Option<(&'a AccessPoint, &'a Station)> {
+    session.and_then(|session| {
+      session
+        .wifi
+        .aps
+        .iter()
+        .find(|ap| ap.mac == ap_mac)
+        .and_then(|ap| ap.clients.iter().find(|sta| sta.mac == sta_mac).map(|sta| (ap, sta)))
+    })
   }
 
-  fn find_ap_sta_in_cached(&self, sta_mac: &str, ap_mac: &str) -> Option<(AccessPoint, Station)> {
-    for ap in &self.access_points {
-      if ap.mac == ap_mac {
-        for sta in &ap.clients {
-          if sta.mac == sta_mac {
-            return Some((ap.clone(), sta.clone()));
-          }
-        }
-        for sta in &ap.clients {
-          if sta.mac == sta_mac {
-            return Some((ap.clone(), sta.clone()));
-          }
-        }
-      }
-    }
-    None
+  fn find_ap_sta_in_cached(&self, sta_mac: &str, ap_mac: &str) -> Option<(&AccessPoint, &Station)> {
+    self
+      .access_points
+      .iter()
+      .find(|ap| ap.mac == ap_mac)
+      .and_then(|ap| ap.clients.iter().find(|sta| sta.mac == sta_mac).map(|sta| (ap, sta)))
   }
 
   pub async fn set_channel(&mut self, channel: u8) {
     if self.automata.is_stale() {
-      LOGGER.log_debug(
-        "AGENT",
-        &format!("Recon is stale, skipping channel switch to {channel}"),
-      );
+      LOGGER.log_debug("AGENT", &format!("Recon is stale, skipping channel switch to {channel}"));
       return;
     }
 
     LOGGER.log_debug("Agent", &format!("Attempting switch to Channel {channel}"));
 
     let mut wait = 0;
+
     if self.automata.epoch.did_deauth {
       wait = config().personality.hop_recon_time;
     } else if self.automata.epoch.did_associate {
@@ -780,30 +652,23 @@ impl Agent {
 
     if channel != self.current_channel {
       if self.current_channel != 0 && wait > 0 {
-        LOGGER.log_debug(
-          "AGENT",
-          &format!("Waiting {wait} seconds before switching channel"),
-        );
+        LOGGER.log_debug("AGENT", &format!("Waiting {wait} seconds before switching channel"));
         self.automata.wait_for(wait, None).await;
       }
+
       let chs = channel.to_string();
       let (tx, rx) = tokio::sync::oneshot::channel();
+
       self
         .bettercap
-        .send_command(BettercapCommand::Run {
-          args: vec!["wifi.recon.channel".to_string(), chs],
-          respond_to: tx,
-        })
+        .send_command(BettercapCommand::run(format!("wifi.recon.channel {chs};"), tx))
         .await;
 
       match rx.await {
         Ok(Ok(())) => {
           self.current_channel = channel;
           self.automata.epoch.track("hop", Some(1));
-          self
-            .automata
-            .view
-            .set("channel", StateValue::Number(channel.into()));
+          self.automata.view.set("channel", StateValue::Number(channel.into()));
           LOGGER.log_info("AGENT", &format!("Switched to channel {channel}"));
         }
         Ok(Err(e)) => {
@@ -816,45 +681,25 @@ impl Agent {
     }
   }
 
-  #[allow(clippy::future_not_send)]
   pub async fn restart_module(&self, module: &str) {
     let (tx, rx) = tokio::sync::oneshot::channel();
+
     self
       .bettercap
-      .send_command(BettercapCommand::Run {
-        args: vec![module.to_string(), "off".to_string()],
-        respond_to: tx,
-      })
+      .send_command(BettercapCommand::run(format!("{module} off; {module} on;"), tx))
       .await;
 
     if let Err(e) = rx.await {
-      LOGGER.log_error("AGENT", &format!("Failed to stop module {module}: {e}"));
-      return;
-    }
-
-    let (tx, rx) = tokio::sync::oneshot::channel();
-    self
-      .bettercap
-      .send_command(BettercapCommand::Run {
-        args: vec![module.to_string(), "on".to_string()],
-        respond_to: tx,
-      })
-      .await;
-
-    if let Err(e) = rx.await {
-      LOGGER.log_error("AGENT", &format!("Failed to start module {module}: {e}"));
+      LOGGER.log_error("AGENT", &format!("Failed to restart module {module}: {e}"));
     }
   }
 
-  #[allow(clippy::future_not_send)]
   pub async fn stop_module(&self, module: &str) {
     let (tx, rx) = tokio::sync::oneshot::channel();
+
     self
       .bettercap
-      .send_command(BettercapCommand::Run {
-        args: vec![module.to_string(), "off".to_string()],
-        respond_to: tx,
-      })
+      .send_command(BettercapCommand::run(format!("{module} off;"), tx))
       .await;
 
     if let Err(e) = rx.await {
@@ -862,15 +707,12 @@ impl Agent {
     }
   }
 
-  #[allow(clippy::future_not_send)]
   pub async fn start_module(&self, module: &str) {
     let (tx, rx) = tokio::sync::oneshot::channel();
+
     self
       .bettercap
-      .send_command(BettercapCommand::Run {
-        args: vec![module.to_string(), "on".to_string()],
-        respond_to: tx,
-      })
+      .send_command(BettercapCommand::run(format!("{module} on;"), tx))
       .await;
 
     if let Err(e) = rx.await {

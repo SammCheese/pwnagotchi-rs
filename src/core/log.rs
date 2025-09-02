@@ -6,6 +6,7 @@ use std::{
 use crate::core::config::config;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+
 pub enum LogLevel {
   Debug,
   Info,
@@ -30,15 +31,16 @@ fn string_to_loglevel(level: &str) -> LogLevel {
 
 impl Log {
   pub fn new(file: &str) -> Self {
-    let logfile = Self {
-      file: file.to_string(),
-    };
+    let logfile = Self { file: file.to_string() };
+
     logfile.initialize();
+
     logfile
   }
 
   fn initialize(&self) {
     let path = std::path::Path::new(&self.file);
+
     if let Some(parent) = path.parent()
       && !parent.exists()
       && let Err(e) = fs::create_dir_all(parent)
@@ -55,25 +57,16 @@ impl Log {
       LogLevel::Error => "ERROR",
       LogLevel::Fatal => "FATAL",
     };
-    let config_level = string_to_loglevel(config().main.loglevel.as_str());
+
+    let config_level = string_to_loglevel(&config().main.loglevel);
 
     if level < &config_level {
       return;
     }
 
-    let log_entry = format!(
-      "[{}] [{}]: [{}] {}\n",
-      chrono::Utc::now(),
-      origin,
-      level_str,
-      message
-    );
+    let log_entry = format!("[{}] [{}]: [{}] {}\n", chrono::Utc::now(), origin, level_str, message);
 
-    if let Ok(mut file) = OpenOptions::new()
-      .create(true)
-      .append(true)
-      .open(&self.file)
-    {
+    if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&self.file) {
       if let Err(e) = file.write_all(log_entry.as_bytes()) {
         eprintln!("Failed to write to log file: {e}");
       }
@@ -100,20 +93,19 @@ impl Log {
 
   pub fn log_fatal(&self, origin: &str, message: &str) {
     self.log(origin, message, &LogLevel::Fatal);
+
     std::process::exit(1);
   }
 }
 
 impl Default for Log {
   fn default() -> Self {
-    Self {
-      file: config().main.log_path.clone(),
-    }
+    Self { file: config().main.log_path.to_string() }
   }
 }
 
 pub static LOGGER: std::sync::LazyLock<Log> = std::sync::LazyLock::new(|| {
-  let log = Log::new(config().main.log_path.clone().as_str());
+  let log = Log::new(&config().main.log_path);
   log.log_info("", "#=========== STARTED ===========#");
   log
 });

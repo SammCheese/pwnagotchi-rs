@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -15,12 +17,12 @@ pub struct UIConfig {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct UIWebConfig {
   pub enabled: bool,
-  pub address: String,
+  pub address: Cow<'static, str>,
   pub port: u16,
-  pub username: String,
-  pub password: String,
-  pub origin: String,
-  pub on_frame: String,
+  pub username: Cow<'static, str>,
+  pub password: Cow<'static, str>,
+  pub origin: Cow<'static, str>,
+  pub on_frame: Cow<'static, str>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -49,7 +51,7 @@ impl Default for UIConfig {
         username: "user".into(),
         password: "pass".into(),
         origin: "http://localhost".into(),
-        on_frame: "console.log('frame')".into(),
+        on_frame: "".into(),
       },
       display: UIDisplayConfig {
         enabled: false,

@@ -1,19 +1,6 @@
-#![warn(clippy::unwrap_used)]
-#![warn(clippy::expect_used)]
-#![warn(clippy::dbg_macro)]
-#![warn(clippy::todo)]
-#![warn(clippy::panic)]
-#![warn(clippy::clone_on_copy)]
-#![warn(clippy::clone_on_ref_ptr)]
-#![warn(clippy::needless_collect)]
-#![warn(clippy::single_match)]
-#![warn(clippy::wildcard_imports)]
-#![warn(clippy::nursery)]
-#![warn(clippy::pedantic)]
-#![allow(clippy::must_use_candidate)]
-#![allow(clippy::struct_excessive_bools)]
-
 extern crate pwnagotchi_rs;
+
+use std::{process::exit, sync::Arc};
 
 use clap::Parser;
 use nix::libc::EXIT_SUCCESS;
@@ -29,7 +16,6 @@ use pwnagotchi_rs::core::{
   stats::SessionFetcher,
   ui::old::web::server::Server,
 };
-use std::{process::exit, sync::Arc};
 
 #[derive(Parser, Debug)]
 struct Cli {
@@ -40,12 +26,7 @@ struct Cli {
     help = "The configuration file to use"
   )]
   config: String,
-  #[clap(
-    short = 'l',
-    long = "log-level",
-    default_value = "info",
-    help = "The log level to use"
-  )]
+  #[clap(short = 'l', long = "log-level", default_value = "info", help = "The log level to use")]
   log_level: String,
   #[clap(
     short = 'm',
@@ -54,19 +35,9 @@ struct Cli {
     help = "Whether to do manual mode"
   )]
   manual: bool,
-  #[clap(
-    short,
-    long = "clear",
-    default_value = "false",
-    help = "Clears the screen and exits"
-  )]
+  #[clap(short, long = "clear", default_value = "false", help = "Clears the screen and exits")]
   clear: bool,
-  #[clap(
-    short,
-    long = "debug",
-    default_value = "false",
-    help = "Enables debug mode"
-  )]
+  #[clap(short, long = "debug", default_value = "false", help = "Enables debug mode")]
   debug: bool,
   #[clap(long = "version", help = "Prints the version information")]
   show_version: bool,
@@ -84,6 +55,7 @@ async fn main() {
     println!("\x1B[2J\x1B[1;1H");
     exit(EXIT_SUCCESS);
   }
+
   if cli.show_version {
     println!("Version: {}", version());
     exit(EXIT_SUCCESS);
@@ -122,7 +94,6 @@ async fn main() {
   }
 }
 
-#[must_use]
 pub const fn version() -> &'static str {
   env!("CARGO_PKG_VERSION")
 }

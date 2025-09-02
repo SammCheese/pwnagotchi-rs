@@ -1,3 +1,13 @@
+use std::path::Path;
+
+use image::{DynamicImage, Rgba, RgbaImage};
+use imageproc::{
+  drawing::{draw_filled_rect_mut, draw_hollow_rect_mut, draw_line_segment_mut},
+  rect::Rect,
+};
+
+use crate::core::ui::{draw::draw_text_mut, state::StateValue};
+
 #[derive(Clone)]
 pub struct TextStyle {
   pub font: String,
@@ -20,13 +30,6 @@ impl Default for TextStyle {
     }
   }
 }
-use crate::core::ui::{draw::draw_text_mut, state::StateValue};
-use image::{DynamicImage, Rgba, RgbaImage};
-use imageproc::{
-  drawing::{draw_filled_rect_mut, draw_hollow_rect_mut, draw_line_segment_mut},
-  rect::Rect,
-};
-use std::path::Path;
 
 pub trait Widget: Send + Sync {
   fn draw(&self, canvas: &mut RgbaImage);
@@ -62,7 +65,9 @@ impl Widget for Bitmap {
     if self.color == 0xff {
       img.invert();
     }
+
     let img_rgba = img.to_rgba8();
+
     image::imageops::overlay(canvas, &img_rgba, self.xy.0.into(), self.xy.1.into());
   }
   fn set_value(&mut self, _value: StateValue) {}
@@ -118,11 +123,13 @@ pub struct FilledRect {
   rect: Rect,
   color: Rgba<u8>,
 }
+
 impl FilledRect {
   pub const fn new(rect: Rect, color: Rgba<u8>) -> Self {
     Self { rect, color }
   }
 }
+
 impl Widget for FilledRect {
   fn draw(&self, canvas: &mut RgbaImage) {
     draw_filled_rect_mut(canvas, self.rect, self.color);
@@ -141,13 +148,10 @@ pub struct TextWidget {
 
 impl TextWidget {
   pub fn new(xy: (u32, u32), value: impl Into<String>, style: TextStyle) -> Self {
-    Self {
-      xy,
-      value: value.into(),
-      style,
-    }
+    Self { xy, value: value.into(), style }
   }
 }
+
 impl Widget for TextWidget {
   fn draw(&self, canvas: &mut RgbaImage) {
     draw_text_mut(
@@ -160,6 +164,7 @@ impl Widget for TextWidget {
       self.style.weight,
     );
   }
+
   fn set_value(&mut self, value: StateValue) {
     match value {
       StateValue::None => {}
@@ -177,6 +182,7 @@ impl Widget for TextWidget {
       }
     }
   }
+
   fn get_value(&self) -> StateValue {
     StateValue::Text(self.value.clone())
   }
@@ -223,6 +229,7 @@ impl Widget for LabeledValue {
       label_style.size,
       label_style.weight,
     );
+
     let mut value_style = self.style.clone();
     value_style.weight = cosmic_text::Weight::NORMAL;
     draw_text_mut(
@@ -235,6 +242,7 @@ impl Widget for LabeledValue {
       value_style.weight,
     );
   }
+
   fn set_value(&mut self, value: StateValue) {
     match value {
       StateValue::None => {}
@@ -252,6 +260,7 @@ impl Widget for LabeledValue {
       }
     }
   }
+
   fn get_value(&self) -> StateValue {
     StateValue::Text(self.value.clone())
   }

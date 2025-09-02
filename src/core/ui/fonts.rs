@@ -1,15 +1,20 @@
+use std::{
+  collections::HashMap,
+  hash::Hash,
+  sync::{Arc, Mutex},
+};
+
 use cosmic_text::{FontSystem, SwashCache};
 use fontdb::{self, Database};
-use std::hash::Hash;
-use std::sync::Mutex;
-use std::{collections::HashMap, sync::Arc};
 
 const FONTNAME: &str = "DejaVu Sans Mono";
 
 pub static STATUS_FONT_NAME: &str = FONTNAME;
+
 pub static SIZE_OFFSET: f32 = 0.0;
 
 #[derive(Eq, Hash, PartialEq)]
+
 pub enum FontType {
   Regular,
   Bold,
@@ -36,8 +41,10 @@ impl Fonts {
   pub fn new() -> Self {
     let mut db = Database::new();
     db.load_system_fonts();
+
     // Arch Linux for testing.
     let dir = std::path::Path::new("/usr/share/fonts/TTF/");
+
     db.load_fonts_dir(dir);
     Self {
       db,
@@ -62,17 +69,17 @@ impl Fonts {
     {
       self.loaded.insert(family.to_string(), bytes);
     }
+
     self.loaded.get(family).map(std::vec::Vec::as_slice)
   }
 
   pub fn get_status_font_bytes(&mut self) -> Option<Arc<Vec<u8>>> {
-    self
-      .get_font_bytes(STATUS_FONT_NAME)
-      .map(|b| Arc::new(b.to_vec()))
+    self.get_font_bytes(STATUS_FONT_NAME).map(|b| Arc::new(b.to_vec()))
   }
 }
 
 pub static FONTS: std::sync::LazyLock<Mutex<FontSystem>> =
   std::sync::LazyLock::new(|| Mutex::new(FontSystem::new()));
+
 pub static FONT_CACHE: std::sync::LazyLock<Mutex<SwashCache>> =
   std::sync::LazyLock::new(|| Mutex::new(SwashCache::new()));
