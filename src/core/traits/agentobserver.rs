@@ -6,6 +6,7 @@ pub trait AgentObserver: Send + Sync {
   fn on_error(&self, ap: &AccessPoint, err: &str);
   fn set_starting(&self);
   fn set_ready(&self);
+  fn set_rebooting(&self);
   fn in_good_mood(&self) -> bool;
   fn set_grateful(&self);
   fn set_lonely(&self);

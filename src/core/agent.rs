@@ -32,8 +32,6 @@ pub enum RunningMode {
   Custom,
 }
 
-const RECOVERY_FILE: &str = "/root/.pwnagotchi-recovery";
-
 pub struct Agent {
   pub observer: Arc<Automata>,
   pub bettercap: Arc<dyn BettercapController>,
@@ -82,10 +80,13 @@ impl Agent {
     self.observer.set_ready();
   }
 
-  /*pub async fn stop(&mut self) {
-    LOGGER.log_info("Agent", "Stopping agent...");
-    stop_module(&self.bettercap, WIFI_RECON).await;
-    LOGGER.log_info("Agent", "Agent stopped.");
+  /*fn reboot(&self) {
+    LOGGER.log_info("Agent", "Rebooting agent...");
+    self.observer.set_rebooting();
+  }
+
+  fn restart(&self, mode: Option<RunningMode>) {
+    let mode = mode.unwrap_or(RunningMode::Auto);
   }*/
 
   pub async fn set_mode(&self, sm: &Arc<SessionManager>, mode: RunningMode) {
@@ -120,13 +121,14 @@ impl Agent {
     sm: &Arc<SessionManager>,
   ) -> Vec<(u8, Vec<AccessPoint>)> {
     let aps = self.get_access_points(sm).await;
-    let channels: &HashSet<u8> = &config().personality.channels.iter().copied().collect();
+
+    let channels: HashSet<u8> = config().personality.channels.iter().copied().collect();
     let mut grouped: HashMap<u8, Vec<AccessPoint>> = HashMap::new();
 
     LOGGER.log_debug("Agent", &format!("{} APS", aps.len()));
 
     for ap in aps {
-      if channels.contains(&ap.channel) || channels.is_empty() {
+      if channels.is_empty() || channels.contains(&ap.channel) {
         grouped.entry(ap.channel).or_default().push(ap);
       }
     }
@@ -335,15 +337,14 @@ impl Agent {
     // TODO
   }*/
 
-  pub fn set_access_points(&self, session: &Arc<Session>, aps: &[AccessPoint]) {
-    self.epoch.lock().observe(&aps.to_vec(), &session.state.read().peers);
-    {
-      session.state.write().access_points = aps.to_vec();
-    }
+  pub fn set_access_points(&self, session: &Arc<Session>, aps: &Vec<AccessPoint>) {
+    self.epoch.lock().observe(aps, &session.state.read().peers);
+    session.state.write().access_points.clone_from(aps);
   }
 
   pub async fn get_access_points(&self, sm: &Arc<SessionManager>) -> Vec<AccessPoint> {
-    let blacklist: Vec<String> = config().main.whitelist.iter().map(|s| s.to_lowercase()).collect();
+    let ignored: HashSet<String> =
+      config().main.whitelist.iter().map(|s| s.to_lowercase()).collect();
     let mut aps: Vec<AccessPoint> = Vec::new();
 
     if let Ok(Some(session)) = self.bettercap.session().await {
@@ -357,7 +358,7 @@ impl Agent {
         let mac = ap.mac.to_lowercase();
         let ssid = ap.hostname.to_lowercase();
 
-        if blacklist.contains(&mac) || blacklist.contains(&ssid) {
+        if ignored.contains(&mac) || ignored.contains(&ssid) {
           continue;
         }
 

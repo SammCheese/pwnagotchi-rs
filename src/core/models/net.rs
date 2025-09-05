@@ -60,10 +60,19 @@ pub struct Peer {
   pub advertisement: Advertisement,
 }
 
-#[derive(Debug, Clone)]
-
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Handshake {
   pub mac: String,
   pub timestamp: std::time::SystemTime,
   pub filename: String,
+}
+
+impl Default for Handshake {
+  fn default() -> Self {
+    Self {
+      mac: String::default(),
+      timestamp: std::time::SystemTime::UNIX_EPOCH,
+      filename: String::default(),
+    }
+  }
 }

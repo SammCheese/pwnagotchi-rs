@@ -94,6 +94,10 @@ async fn main() {
   let agent_bc = Arc::clone(&bc_controller);
   let agent = Arc::new(Agent::new(&auto_handle, &agent_bc, &epoch, &view));
 
+  // ADVERTISER
+  //let adv = Arc::new(AsyncAdvertiser::new(Arc::clone(&epoch), &identity,
+  // &view));
+
   // Render Changes to UI
   let view_clone = Arc::clone(&view);
   tokio::task::spawn(async move {
@@ -124,6 +128,11 @@ async fn main() {
   tokio::task::spawn(async move {
     Server::new().start();
   });
+
+  // Advertiser
+  /*tokio::task::spawn(async move {
+    adv.start_advertising(&sm, &view).await;
+  });*/
 
   LOGGER.log_info(
     "Pwnagotchi",

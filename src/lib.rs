@@ -27,6 +27,7 @@ pub mod core {
   pub mod bettercap;
   pub mod cli;
   pub mod config;
+  pub mod grid;
   pub mod identity;
   pub mod log;
   pub mod mesh;
@@ -48,6 +49,7 @@ pub mod core {
   pub mod sessions {
     pub mod lastsession;
     pub mod manager;
+    pub mod recovery;
     pub mod session;
   }
 

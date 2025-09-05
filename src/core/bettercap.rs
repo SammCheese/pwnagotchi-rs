@@ -287,7 +287,8 @@ impl Bettercap {
 
       match req.send().await {
         Ok(resp) => {
-          if resp.status().is_success() {
+          // Bad request could come from an already existing session + setup
+          if resp.status().is_success() || resp.status() == reqwest::StatusCode::BAD_REQUEST {
             return Ok(());
           }
           LOGGER.log_error("Bettercap", &format!("Request failed with status {}", resp.status()));

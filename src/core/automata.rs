@@ -45,6 +45,10 @@ impl AgentObserver for Automata {
     }
   }
 
+  fn set_rebooting(&self) {
+    self.view.on_rebooting();
+  }
+
   fn set_starting(&self) {
     self.view.on_starting();
   }
