@@ -1,3 +1,4 @@
+#![allow(clippy::missing_errors_doc)]
 pub trait HostnameManager {
   fn get_hostname(&self) -> Result<String, Box<dyn std::error::Error>>;
 

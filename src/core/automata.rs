@@ -1,165 +1,172 @@
 use std::sync::Arc;
 
+use parking_lot::Mutex;
+
 use crate::core::{
   ai::Epoch,
   config::config,
   log::LOGGER,
   models::net::AccessPoint,
+  traits::agentobserver::AgentObserver,
   ui::{old::hw::base::get_display_from_config, view::View},
 };
 
 pub struct Automata {
-  pub epoch: Epoch,
+  pub epoch: Arc<Mutex<Epoch>>,
   pub view: Arc<View>,
 }
 
 impl Default for Automata {
   fn default() -> Self {
-    let epoch = Epoch::new();
-    let view = View::new(&get_display_from_config());
+    let epoch = Arc::new(Mutex::new(Epoch::new()));
+    let view = Arc::new(View::new(&get_display_from_config()));
     Self { epoch, view }
   }
 }
 
 impl Automata {
-  pub fn new() -> Self {
-    let epoch = Epoch::new();
-    let view = View::new(&get_display_from_config());
+  pub const fn new(epoch: Arc<Mutex<Epoch>>, view: Arc<View>) -> Self {
     Self { epoch, view }
   }
+}
 
-  pub fn on_miss(&mut self, who: &AccessPoint) {
+#[async_trait::async_trait]
+impl AgentObserver for Automata {
+  fn on_miss(&self, who: &AccessPoint) {
     LOGGER.log_info("Personality", "Missed an interaction :(");
-
     self.view.on_miss(who);
-
-    self.epoch.track("miss", None);
+    self.epoch.lock().track("miss", None);
   }
 
-  pub fn on_error(&mut self, who: &AccessPoint, error: &str) {
+  fn on_error(&self, who: &AccessPoint, error: &str) {
     LOGGER.log_error("Personality", error);
-
     if error.contains("is an unknown BSSID") {
       self.on_miss(who);
     }
   }
 
-  pub fn set_starting(&self) {
+  fn set_starting(&self) {
     self.view.on_starting();
   }
 
-  pub const fn set_ready(&self) {
+  fn set_ready(&self) {
     //plugins.on('ready')
   }
 
-  pub fn in_good_mood(&self) -> bool {
+  fn in_good_mood(&self) -> bool {
     self.has_support_network_for(1.0)
   }
 
-  pub fn set_grateful(&mut self) {
+  fn set_grateful(&self) {
     self.view.on_grateful();
-
     LOGGER.log_info("Personality", "Unit is grateful.");
   }
 
-  pub fn set_lonely(&mut self) {
+  fn set_lonely(&self) {
     if self.has_support_network_for(1.0) {
       LOGGER.log_info("Personality", "Unit is grateful instead of lonely");
-
       self.set_grateful();
     } else {
       LOGGER.log_info("Personality", "Unit is lonely.");
-
       self.view.on_lonely();
     }
   }
 
-  pub fn set_bored(&mut self) {
+  fn set_bored(&self) {
     let factor =
-      f64::from(self.epoch.inactive_for) / f64::from(config().personality.bored_num_epochs);
-
+      f64::from(self.epoch.lock().inactive_for) / f64::from(config().personality.bored_num_epochs);
     #[allow(clippy::cast_possible_truncation)]
     if self.has_support_network_for(factor as f32) {
       LOGGER.log_info("Personality", "Unit is grateful instead of bored");
-
       self.set_grateful();
     } else {
       self.view.on_bored();
-
       LOGGER.log_warning("Personality", "epochs with not activity -> bored");
     }
   }
 
-  pub fn set_sad(&mut self) {
+  fn set_sad(&self) {
     let factor =
-      f64::from(self.epoch.inactive_for) / f64::from(config().personality.sad_num_epochs);
+      f64::from(self.epoch.lock().inactive_for) / f64::from(config().personality.sad_num_epochs);
 
     #[allow(clippy::cast_possible_truncation)]
     if self.has_support_network_for(factor as f32) {
       LOGGER.log_info("Personality", "Unit is grateful instead of sad");
-
       self.set_grateful();
     } else {
       self.view.on_sad();
-
       LOGGER.log_warning(
         "Personality",
-        format!("{} epochs with no activity -> sad", self.epoch.inactive_for).as_str(),
+        format!("{} epochs with no activity -> sad", self.epoch.lock().inactive_for).as_str(),
       );
     }
   }
 
-  pub fn set_angry(&mut self, factor: f32) {
+  fn set_angry(&self, factor: f32) {
     if self.has_support_network_for(factor) {
       LOGGER.log_info("Personality", "Unit is grateful instead of angry");
-
       self.set_grateful();
     } else {
       self.view.on_angry();
-
       LOGGER.log_warning(
         "Personality",
-        format!("{} epochs with no activity -> angry", self.epoch.inactive_for).as_str(),
+        format!("{} epochs with no activity -> angry", self.epoch.lock().inactive_for).as_str(),
       );
     }
   }
 
-  pub fn set_excited(&mut self) {
+  fn set_excited(&self) {
     LOGGER.log_info(
       "Personality",
-      format!("{} epochs with activity -> excited", self.epoch.active_for).as_str(),
+      format!("{} epochs with activity -> excited", self.epoch.lock().active_for).as_str(),
     );
-
     self.view.on_excited();
   }
 
-  pub async fn wait_for(&mut self, duration: u32, sleeping: Option<bool>) {
+  async fn wait_for(&self, duration: u32, sleeping: Option<bool>) {
     let sleeping = sleeping.unwrap_or(true);
-
+    {
+      self.epoch.lock().track("sleep", Some(duration));
+    }
     self.view.wait(duration.into(), sleeping, self).await;
-
-    self.epoch.track("sleep", Some(duration));
   }
 
-  pub fn is_stale(&mut self) -> bool {
-    self.epoch.num_missed > config().personality.max_misses_for_recon
+  fn is_stale(&self) -> bool {
+    self.epoch.lock().num_missed > config().personality.max_misses_for_recon
   }
 
-  pub const fn any_activity(&self) -> bool {
-    self.epoch.any_activity
+  fn is_stale_locked(&self, epoch: &Epoch) -> bool {
+    epoch.num_missed > config().personality.max_misses_for_recon
   }
 
-  pub fn next_epoch(&mut self) {
-    LOGGER.log_debug(
-      "Epoch",
-      &format!("Advancing to next epoch {} -> {}", self.epoch.epoch, self.epoch.epoch + 1),
-    );
+  fn any_activity(&self) -> bool {
+    self.epoch.lock().any_activity
+  }
 
-    let was_stale = self.is_stale();
+  fn next_epoch(&self) {
+    let (_epoch_num, did_miss, sad_for, bored_for, active_for, blind_for, was_stale) = {
+      let mut epoch = self.epoch.lock();
 
-    let did_miss = self.epoch.num_missed;
+      LOGGER.log_debug(
+        "Epoch",
+        &format!("Advancing to next epoch {} -> {}", epoch.epoch, epoch.epoch + 1),
+      );
 
-    self.epoch.next();
+      let was_stale = self.is_stale_locked(&epoch);
+
+      let did_miss = epoch.num_missed;
+      epoch.next();
+
+      (
+        epoch.epoch,
+        did_miss,
+        epoch.sad_for,
+        epoch.bored_for,
+        epoch.active_for,
+        epoch.blind_for,
+        was_stale,
+      )
+    };
 
     if was_stale {
       let factor = f64::from(did_miss) / f64::from(config().personality.max_misses_for_recon);
@@ -177,8 +184,8 @@ impl Automata {
 
         self.set_lonely();
       }
-    } else if self.epoch.sad_for > 0 {
-      let factor = f64::from(self.epoch.sad_for) / f64::from(config().personality.sad_num_epochs);
+    } else if sad_for > 0 {
+      let factor = f64::from(sad_for) / f64::from(config().personality.sad_num_epochs);
 
       if factor >= 2.0 {
         #[allow(clippy::cast_possible_truncation)]
@@ -186,31 +193,29 @@ impl Automata {
       } else {
         self.set_sad();
       }
-    } else if self.epoch.bored_for > 0 {
+    } else if bored_for > 0 {
       self.set_bored();
-    } else if self.epoch.active_for >= config().personality.excited_num_epochs {
+    } else if active_for >= config().personality.excited_num_epochs {
       self.set_excited();
-    } else if self.epoch.active_for >= 5 && self.has_support_network_for(5.0) {
+    } else if active_for >= 5 && self.has_support_network_for(5.0) {
       self.set_grateful();
     }
 
     // Blindness
-    if self.epoch.blind_for >= 5 {
+    if blind_for >= 5 {
       LOGGER.log_fatal(
         "Personality",
-        format!("{} epochs without visible access points -> we are blind!", self.epoch.blind_for)
-          .as_str(),
+        format!("{blind_for} epochs without visible access points -> we are blind!").as_str(),
       );
 
       //self.restart();
-      self.epoch.blind_for = 0;
+      self.epoch.lock().blind_for = 0;
     }
   }
 
   fn has_support_network_for(&self, factor: f32) -> bool {
     let bond_factor = f64::from(config().personality.bond_encounters_factor);
-
-    let total_encounters = f64::from(self.epoch.num_peers);
+    let total_encounters = f64::from(self.epoch.lock().num_peers);
 
     total_encounters > 0.0 && (bond_factor / total_encounters) >= factor.into()
   }

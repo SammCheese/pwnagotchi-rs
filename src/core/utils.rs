@@ -1,6 +1,7 @@
+#![allow(clippy::must_use_candidate)]
+
 use std::{fs, process::Command, time::Duration};
 
-use rand::Rng;
 use regex::Regex;
 
 use crate::core::{
@@ -93,9 +94,7 @@ pub fn random_choice<T>(choices: &[T]) -> String
 where
   T: AsRef<str>,
 {
-  let mut rng = rand::rng();
-  let idx = rng.random_range(0..choices.len());
-  choices[idx].as_ref().to_string()
+  fastrand::choice(choices).map(|s| s.as_ref().to_string()).unwrap_or_default()
 }
 
 pub fn format_duration_human(duration: Duration) -> String {

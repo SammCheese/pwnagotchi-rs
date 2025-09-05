@@ -3,8 +3,8 @@
 
 use std::{borrow::Cow, collections::HashMap, fs};
 
-use chrono::{DateTime, Utc};
 use hex::ToHex;
+use time::{UtcDateTime, macros::format_description};
 
 use crate::core::{
   config::config, log::LOGGER, mesh::advertiser::Advertisement, models::net::Peer, ui::view::View,
@@ -12,25 +12,15 @@ use crate::core::{
 };
 
 const EPOCH_TOKEN: &str = r"[epoch ";
-
 const EPOCH_PARSER: &str = r"^.+\[epoch (\d+)] (.+)$";
-
 const EPOCH_DATA_PARSER: &str = r"([a-z_]+)=(\S+)";
-
 const TRAINING_TOKEN: &str = r" training epoch ";
-
 const START_TOKEN: &str = r"Initializing Agent";
-
 const DEAUTH_TOKEN: &str = r"deauthing ";
-
 const ASSOC_TOKEN: &str = r"sending association frame to ";
-
 const HANDSHAKE_TOKEN: &str = r"!!! captured new handshake ";
-
 const PEER_TOKEN: &str = r"detected unit ";
-
 const PEER_PARSER: &str = r"detected unit (.+)@(.+) \(v.+\) on channel \d+ \(([\d\-]+) dBm\) \[sid:(.+) pwnd_tot:(\d+) uptime:(\d+)]";
-
 const LAST_SESSION_FILE: &str = "/root/pwnagotchi/.pwnagotchi-last-session";
 
 #[derive(Debug, Clone)]
@@ -164,11 +154,20 @@ impl LastSession {
         self.parsed = true;
       }
     }
+    LOGGER.log_info(
+      "Session",
+      &format!(
+        "Parsed last session: {} (saved: {}, new: {})",
+        self.last_session_id,
+        self.last_saved_session_id,
+        self.is_new()
+      ),
+    );
   }
 
   fn parse_stats(&mut self) {
-    let mut started_at: Option<DateTime<Utc>> = None;
-    let mut stopped_at: Option<DateTime<Utc>> = None;
+    let mut started_at: Option<UtcDateTime> = None;
+    let mut stopped_at: Option<UtcDateTime> = None;
     let mut cache = HashMap::<String, CacheType>::new();
 
     let epoch_data_re = match regex::Regex::new(EPOCH_DATA_PARSER) {
@@ -205,9 +204,8 @@ impl LastSession {
       let line_timestamp = parts[0].trim_start_matches('[').trim();
       let line = parts[1..].join("]");
 
-      stopped_at = chrono::NaiveDateTime::parse_from_str(line_timestamp, "%Y-%m-%d %H:%M:%S")
-        .ok()
-        .map(|naive| DateTime::<Utc>::from_naive_utc_and_offset(naive, Utc));
+      let format = format_description!("[year]-[month]-[day] [hour]:[minute]:[second]");
+      stopped_at = UtcDateTime::parse(line_timestamp, &format).ok();
 
       if started_at.is_none() {
         started_at = stopped_at;
@@ -318,13 +316,9 @@ impl LastSession {
     }
   }
 
-  fn finalize_stats(
-    &mut self,
-    started_at: Option<DateTime<Utc>>,
-    stopped_at: Option<DateTime<Utc>>,
-  ) {
+  fn finalize_stats(&mut self, started_at: Option<UtcDateTime>, stopped_at: Option<UtcDateTime>) {
     if let (Some(start), Some(stop)) = (started_at, stopped_at) {
-      let duration = stop.signed_duration_since(start);
+      let duration = stop.unix_timestamp() - start.unix_timestamp();
 
       self.duration = format!("{duration}");
     } else {

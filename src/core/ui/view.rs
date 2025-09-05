@@ -6,14 +6,14 @@ use std::{
 };
 
 use image::{Rgba, RgbaImage};
-use rand::Rng;
 
 use crate::core::{
   automata::Automata,
   config::config,
   log::LOGGER,
   models::net::{AccessPoint, Peer, Station},
-  session::LastSession,
+  sessions::lastsession::LastSession,
+  traits::agentobserver::AgentObserver,
   ui::{
     components::{LabeledValue, Line, TextStyle, TextWidget, Widget},
     fonts::STATUS_FONT_NAME,
@@ -72,14 +72,14 @@ pub struct View {
 }
 
 impl View {
-  pub fn new(display: &Arc<dyn DisplayTrait + Send + Sync>) -> Arc<Self> {
+  pub fn new(display: &Arc<dyn DisplayTrait + Send + Sync>) -> Self {
     let inverted = config().ui.inverted;
     let background_color = if inverted { BLACK } else { WHITE };
     let foreground_color = if inverted { WHITE } else { BLACK };
 
     let layout = Arc::clone(display);
 
-    let view = Arc::new(Self {
+    let view = Self {
       display: Arc::clone(display),
       voice: Arc::new(Mutex::new(Voice::new())),
       state: Arc::new(Mutex::new(State::new())),
@@ -91,17 +91,17 @@ impl View {
       render_callbacks: Arc::new(Vec::new()),
       width: layout.layout().width,
       height: layout.layout().height,
-    });
+    };
 
-    {
-      let arc = Arc::clone(&view);
-      arc.populate_state();
-    }
+    view.populate_state();
+    view.configure_render_settings();
 
-    if config().ui.fps > 0.0 {
-      Self::start_render_loop(Arc::clone(&view));
-    } else {
-      let mut cloned_ignore = Arc::clone(&view.ignore_changes);
+    view
+  }
+
+  pub fn configure_render_settings(&self) {
+    if config().ui.fps < 1.0 {
+      let mut cloned_ignore = Arc::clone(&self.ignore_changes);
       match Arc::get_mut(&mut cloned_ignore) {
         Some(ignore) => {
           ignore.push("uptime");
@@ -112,18 +112,14 @@ impl View {
 
       LOGGER.log_warning("UI", "FPS set to 0, Display only updates for major changes");
     }
-    view
   }
 
-  fn start_render_loop(view: Arc<Self>) {
+  pub async fn start_render_loop(&self) {
     let delay = 1.0 / f64::from(config().ui.fps);
-
-    tokio::spawn(async move {
-      loop {
-        view.update(None, None);
-        tokio::time::sleep(Duration::from_secs_f64(delay)).await;
-      }
-    });
+    loop {
+      self.update(None, None);
+      tokio::time::sleep(Duration::from_secs_f64(delay)).await;
+    }
   }
 
   fn populate_state(&self) {
@@ -596,7 +592,7 @@ impl View {
       FaceType::Upload2,
     ];
 
-    self.set("face", StateValue::Face(faces[rand::rng().random_range(0..faces.len())]));
+    self.set("face", StateValue::Face(faces[fastrand::usize(..faces.len())]));
 
     self.set(
       "status",

@@ -3,6 +3,8 @@ use std::{
   io::Write,
 };
 
+use time::UtcDateTime;
+
 use crate::core::config::config;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -64,7 +66,7 @@ impl Log {
       return;
     }
 
-    let log_entry = format!("[{}] [{}]: [{}] {}\n", chrono::Utc::now(), origin, level_str, message);
+    let log_entry = format!("[{}] [{}]: [{}] {}\n", UtcDateTime::now(), origin, level_str, message);
 
     if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&self.file) {
       if let Err(e) = file.write_all(log_entry.as_bytes()) {

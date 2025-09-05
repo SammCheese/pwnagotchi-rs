@@ -4,7 +4,6 @@ use std::{
 };
 
 use base64::{Engine, engine::general_purpose};
-use crypto::digest::Digest;
 use nix::libc::EXIT_FAILURE;
 use rsa::{
   Pss, RsaPrivateKey, RsaPublicKey,
@@ -12,7 +11,7 @@ use rsa::{
   rand_core::OsRng,
   traits::SignatureScheme,
 };
-use sha2::Sha256;
+use sha2::{Digest, Sha256};
 
 use crate::core::{config::config, log::LOGGER};
 
@@ -51,7 +50,7 @@ impl Default for Identity {
 }
 
 impl Identity {
-  pub fn new() -> Self {
+  pub async fn new() -> Self {
     let path = config().identity.path.to_string();
     let priv_path = format!("{path}id_rsa");
     let pub_path = format!("{priv_path}.pub");
@@ -68,13 +67,13 @@ impl Identity {
       fingerprint: None,
     };
 
-    ident.initialize();
+    ident.initialize().await;
     ident
   }
 
-  pub fn initialize(&mut self) {
+  pub async fn initialize(&mut self) {
     if !path::Path::new(&self.path).exists()
-      && let Err(e) = std::fs::create_dir_all(&self.path)
+      && let Err(e) = tokio::fs::create_dir_all(&self.path).await
     {
       LOGGER.log_error(
         "IDENTITY",

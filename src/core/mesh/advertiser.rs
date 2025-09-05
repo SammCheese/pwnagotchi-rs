@@ -1,11 +1,12 @@
 #![allow(clippy::cast_possible_truncation)]
 
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 use crate::core::{
   agent::Agent,
   config::{PersonalityConfig, config},
   identity::Identity,
+  sessions::manager::SessionManager,
   utils,
 };
 
@@ -51,12 +52,12 @@ impl AsyncAdvertiser {
     }
   }
 
-  fn update_advertisement(&mut self) {
-    self.advertisement.pwnd_run = self.agent.handshakes.len() as u32;
+  async fn update_advertisement(&mut self, sm: &Arc<SessionManager>) {
+    self.advertisement.pwnd_run = sm.get_session().await.state.read().handshakes.len() as u32;
     self.advertisement.pwnd_total =
       utils::total_unique_handshakes(&config().main.handshakes_path) as u32;
     self.advertisement.uptime = 0;
-    self.advertisement.epoch = self.agent.automata.epoch.epoch as u32;
+    //self.advertisement.epoch = self.agent.observer.epoch.epoch as u32;
   }
 
   pub fn start_advertising(self) {

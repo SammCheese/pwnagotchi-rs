@@ -6,15 +6,21 @@ use clap::Parser;
 use nix::libc::EXIT_SUCCESS;
 use pwnagotchi_rs::core::{
   agent::Agent,
+  ai::Epoch,
+  automata::Automata,
   bettercap::{Bettercap, spawn_bettercap},
   cli,
-  commands::spawn_agent,
   config::{config, init_config},
-  events::listener::start_event_loop,
+  events::eventlistener::start_event_loop,
   identity::Identity,
   log::LOGGER,
-  stats::SessionFetcher,
-  ui::old::web::server::Server,
+  sessions::manager::SessionManager,
+  traits::bettercapcontroller::BettercapController,
+  ui::{
+    old::{hw::base::get_display_from_config, web::server::Server},
+    refresher::start_sessionfetcher,
+    view::View,
+  },
 };
 
 #[derive(Parser, Debug)]
@@ -69,13 +75,55 @@ async fn main() {
     exit(EXIT_SUCCESS);
   }
 
-  let identity = Identity::new();
-  let bettercap = Arc::new(spawn_bettercap(Bettercap::new()));
-  let agent = Agent::new(Arc::clone(&bettercap));
-  let handle = Arc::new(spawn_agent(agent));
-  start_event_loop(&Arc::clone(&handle), &Arc::clone(&bettercap));
-  SessionFetcher::new().start_sessionfetcher(Arc::clone(&handle));
-  Server::new().start();
+  // Must complete before anything else
+  let identity = Identity::new().await;
+  let sm = Arc::new(SessionManager::new());
+
+  let epoch = Arc::new(parking_lot::Mutex::new(Epoch::new()));
+  let view = Arc::new(View::new(&get_display_from_config()));
+
+  // PERSONALITY
+  let automata = Automata::new(Arc::clone(&epoch), Arc::clone(&view));
+  let auto_handle = Arc::new(automata);
+
+  // BETTERCAP
+  let bettercap = Arc::new(Bettercap::new());
+  let bc_controller: Arc<dyn BettercapController> = Arc::new(spawn_bettercap(&bettercap));
+
+  // AGENT
+  let agent_bc = Arc::clone(&bc_controller);
+  let agent = Arc::new(Agent::new(&auto_handle, &agent_bc, &epoch, &view));
+
+  // Render Changes to UI
+  let view_clone = Arc::clone(&view);
+  tokio::task::spawn(async move {
+    view_clone.start_render_loop().await;
+  });
+
+  // Fetch Session data for UI
+  let sm1 = Arc::clone(&sm);
+  let view1 = Arc::clone(&view);
+  tokio::task::spawn(async move {
+    start_sessionfetcher(&sm1, &view1).await;
+  });
+
+  // Bettercap Event Websocket
+  let bettercap = Arc::clone(&bettercap);
+  tokio::task::spawn(async move {
+    bettercap.run_websocket().await;
+  });
+
+  // Event Listener
+  let view2 = Arc::clone(&view);
+  let sm2 = Arc::clone(&sm);
+  tokio::task::spawn(async move {
+    start_event_loop(&sm2, &bc_controller, &epoch, &view2).await;
+  });
+
+  // WEB UI
+  tokio::task::spawn(async move {
+    Server::new().start();
+  });
 
   LOGGER.log_info(
     "Pwnagotchi",
@@ -88,10 +136,10 @@ async fn main() {
   );
 
   if cli.manual {
-    cli::do_manual_mode(Arc::clone(&handle), Some(cli.skip)).await;
+    cli::do_manual_mode(&sm, &agent).await;
   } else {
-    cli::do_auto_mode(Arc::clone(&handle), Some(cli.skip)).await;
-  }
+    cli::do_auto_mode(&sm, &agent_bc, &agent, Arc::clone(&auto_handle)).await;
+  };
 }
 
 pub const fn version() -> &'static str {

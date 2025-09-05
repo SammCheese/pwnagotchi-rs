@@ -5,7 +5,6 @@
 )]
 
 use std::{
-  collections::HashMap,
   mem::take,
   time::{Duration, Instant},
   vec,
@@ -16,6 +15,7 @@ use tokio::sync::mpsc::{Receiver, Sender, channel};
 use crate::core::{
   ai::reward::RewardFunction,
   config::config,
+  log::LOGGER,
   mesh::wifi,
   models::net::{AccessPoint, Peer},
 };
@@ -52,8 +52,9 @@ pub struct Epoch {
 
   pub non_overlapping_channels: Vec<String>,
   pub observation: Observation,
+  pub observation_ready: bool,
   pub epoch_data: EpochData,
-  reward: RewardFunction,
+  pub epoch_data_ready: bool,
 }
 
 #[derive(Clone)]
@@ -162,8 +163,9 @@ impl Epoch {
       epoch_duration: 0.0,
       non_overlapping_channels: Vec::new(),
       observation: Observation::default(),
+      observation_ready: false,
       epoch_data: EpochData::default(),
-      reward: RewardFunction,
+      epoch_data_ready: false,
     }
   }
 
@@ -228,8 +230,6 @@ impl Epoch {
   }
 
   pub fn next(&mut self) {
-    self.epoch_duration = self.epoch_start.elapsed().as_secs_f64();
-
     if !self.any_activity && !self.did_handshakes {
       self.inactive_for += 1;
       self.active_for = 0;
@@ -251,6 +251,9 @@ impl Epoch {
       self.bored_for = 0;
     }
 
+    let now = Instant::now();
+    self.epoch_duration = now.duration_since(self.epoch_start).as_secs_f64();
+
     self.epoch_data = EpochData {
       duration_secs: self.epoch_duration,
       slept_for_secs: f64::from(self.num_slept),
@@ -267,18 +270,45 @@ impl Epoch {
       num_deauths: self.num_deauths,
       num_associations: self.num_assocs,
       num_handshakes: self.num_handshakes,
-      reward: RewardFunction::call(self.epoch + 1, &self.reward_state()),
       cpu_load: 0.0,
       mem_usage: 0.0,
       temperature: 0.0,
+      reward: RewardFunction::call(self.epoch + 1, &self.epoch_data),
     };
 
+    LOGGER.log_info("Epoch", format!(
+      "duration={} slept_for={} blind={} sad={} bored={} inactive={} active={} peers={} tot_bond={} avg_bond={} hops={} missed={} deauths={} assocs={} handshakes={} cpu={} mem={} temperature={} reward={}",
+      self.epoch_data.duration_secs,
+      self.epoch_data.slept_for_secs,
+      self.epoch_data.blind_for_epochs,
+      self.epoch_data.sad_for_epochs,
+      self.epoch_data.bored_for_epochs,
+      self.epoch_data.inactive_for_epochs,
+      self.epoch_data.active_for_epochs,
+      self.epoch_data.num_peers,
+      self.epoch_data.tot_bond,
+      self.epoch_data.avg_bond,
+      self.epoch_data.num_hops,
+      self.epoch_data.missed_interactions,
+      self.epoch_data.num_deauths,
+      self.epoch_data.num_associations,
+      self.epoch_data.num_handshakes,
+      self.epoch_data.cpu_load,
+      self.epoch_data.mem_usage,
+      self.epoch_data.temperature,
+      self.epoch_data.reward,
+    ).as_str());
+
+    self.epoch_data_ready = true;
     self.data_tx.try_send(take(&mut self.epoch_data)).ok();
 
     self.epoch += 1;
     self.epoch_start = Instant::now();
     self.did_deauth = false;
     self.num_deauths = 0;
+    self.num_peers = 0;
+    self.total_bond_factor = 0.0;
+    self.avg_bond_factor = 0.0;
     self.did_associate = false;
     self.num_assocs = 0;
     self.num_missed = 0;
@@ -287,9 +317,6 @@ impl Epoch {
     self.num_hops = 0;
     self.num_slept = 0;
     self.any_activity = false;
-    self.num_peers = 0;
-    self.total_bond_factor = 0.0;
-    self.avg_bond_factor = 0.0;
   }
 
   pub fn track(&mut self, activity: &str, increment: Option<u32>) {
@@ -346,20 +373,5 @@ impl Epoch {
 
   fn data(self) -> EpochData {
     self.epoch_data
-  }
-
-  fn reward_state(&self) -> HashMap<&str, f64> {
-    let mut state = std::collections::HashMap::new();
-    state.insert("num_deauths", f64::from(self.num_deauths));
-    state.insert("num_associations", f64::from(self.num_assocs));
-    state.insert("num_handshakes", f64::from(self.num_handshakes));
-    state.insert("active_for_epochs", f64::from(self.active_for));
-    state.insert("blind_for_epochs", f64::from(self.blind_for));
-    state.insert("inactive_for_epochs", f64::from(self.inactive_for));
-    state.insert("missed_interactions", f64::from(self.num_missed));
-    state.insert("num_hops", f64::from(self.num_hops));
-    state.insert("sad_for_epochs", f64::from(self.sad_for));
-    state.insert("bored_for_epochs", f64::from(self.bored_for));
-    state
   }
 }

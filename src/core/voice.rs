@@ -2,7 +2,7 @@ use std::fmt::Write;
 
 use crate::core::{
   models::net::{AccessPoint, Station},
-  session::LastSession,
+  sessions::lastsession::LastSession,
   utils::{STAP, hostname_or_mac, random_choice},
 };
 

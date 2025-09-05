@@ -7,21 +7,22 @@ use std::{
   time::Duration,
 };
 
-use futures_util::{
-  SinkExt,
-  stream::{SplitStream, StreamExt},
-};
+use futures_util::{SinkExt, StreamExt};
 use tokio::{
   net::TcpStream,
   sync::{broadcast, mpsc},
 };
-use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
-use tungstenite::protocol::Message;
+use tokio_stream::wrappers::SplitStream;
+use tokio_tungstenite::{
+  MaybeTlsStream, WebSocketStream, connect_async, tungstenite::protocol::Message,
+};
 
-use crate::core::{config::config, log::LOGGER, models::bettercap::BettercapSession};
+use crate::core::{
+  config::config, log::LOGGER, models::bettercap::BettercapSession,
+  traits::bettercapcontroller::BettercapController,
+};
 
 #[derive(Debug, Clone)]
-
 pub struct Bettercap {
   pub bettercap_path: Cow<'static, str>,
   pub retries: u32,
@@ -41,6 +42,7 @@ pub struct Bettercap {
   scheme: Cow<'static, str>,
 
   event_tx: broadcast::Sender<String>,
+  req_client: reqwest::Client,
 }
 
 pub enum BettercapCommand {
@@ -50,11 +52,21 @@ pub enum BettercapCommand {
 }
 
 impl BettercapCommand {
-  pub fn run<S>(cmd: S, respond_to: tokio::sync::oneshot::Sender<Result<(), anyhow::Error>>) -> Self
+  pub fn run<S>(
+    cmd: S,
+    respond_to: Option<tokio::sync::oneshot::Sender<Result<(), anyhow::Error>>>,
+  ) -> Self
   where
     S: 'static + AsRef<str>,
   {
-    Self::Run { cmd: cmd.as_ref().into(), respond_to }
+    let tx = respond_to.map_or_else(
+      || {
+        let (tx, _rx) = tokio::sync::oneshot::channel();
+        tx
+      },
+      |tx| tx,
+    );
+    Self::Run { cmd: cmd.as_ref().into(), respond_to: tx }
   }
 }
 
@@ -63,18 +75,29 @@ pub struct BettercapHandle {
   pub command_tx: mpsc::Sender<BettercapCommand>,
 }
 
-impl BettercapHandle {
-  pub async fn send_command(&self, cmd: BettercapCommand) {
+#[async_trait::async_trait]
+impl BettercapController for BettercapHandle {
+  async fn send(&self, cmd: BettercapCommand) -> anyhow::Result<()> {
     let _ = self.command_tx.send(cmd).await;
+    Ok(())
+  }
+
+  async fn session(&self) -> anyhow::Result<Option<BettercapSession>> {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let cmd = BettercapCommand::GetSession { respond_to: tx };
+    let _ = self.command_tx.send(cmd).await;
+    match rx.await {
+      Ok(session) => Ok(session),
+      Err(e) => Err(anyhow::anyhow!("Failed to get Bettercap session: {e}")),
+    }
   }
 }
 
-pub fn spawn_bettercap(bc: Bettercap) -> BettercapHandle {
+pub fn spawn_bettercap(bc: &Arc<Bettercap>) -> BettercapHandle {
   let (tx, mut rx) = mpsc::channel::<BettercapCommand>(100);
 
+  let bettercap = Arc::clone(bc);
   tokio::spawn(async move {
-    let bettercap = bc;
-
     while let Some(cmd) = rx.recv().await {
       match cmd {
         BettercapCommand::Run { cmd, respond_to } => {
@@ -96,26 +119,7 @@ pub fn spawn_bettercap(bc: Bettercap) -> BettercapHandle {
 
 impl Default for Bettercap {
   fn default() -> Self {
-    let (event_tx, _rx) = broadcast::channel(10_000);
-
-    Self {
-      bettercap_path: "/usr/bin/bettercap".into(),
-      retries: 5,
-      ping_timeout: 180,
-      ping_interval: 15,
-      max_queue: 10000,
-      min_sleep: 0.5,
-      max_sleep: 5.0,
-      hostname: "127.0.0.1".into(),
-      scheme: "http".into(),
-      port: 8081,
-      username: "user".into(),
-      password: "pass".into(),
-      url: "%{scheme}://%{username}:%{password}@%{hostname}:%{port}/api".into(),
-      websocket_url: "ws://%{username}:%{password}@%{hostname}:%{port}/api/events".into(),
-      is_ready: Arc::new(AtomicBool::new(false)),
-      event_tx,
-    }
+    Self::new()
   }
 }
 
@@ -127,6 +131,10 @@ impl Bettercap {
     let ws_scheme = if config().bettercap.port == 443 { "wss" } else { "ws" };
     let max_queue = 10_000usize;
     let (event_tx, _rx) = broadcast::channel(max_queue);
+    let req_client = reqwest::Client::builder()
+      .timeout(Duration::from_secs(10))
+      .build()
+      .unwrap_or_default();
 
     Self {
       bettercap_path: Cow::Borrowed(&config().main.bettercap_path),
@@ -159,6 +167,7 @@ impl Bettercap {
       scheme: Cow::Borrowed(scheme),
       is_ready: Arc::new(AtomicBool::new(false)),
       event_tx,
+      req_client,
     }
   }
 
@@ -177,8 +186,12 @@ impl Bettercap {
       .replace("%{port}", &self.port.to_string());
 
     let url = format!("{base}/{sess}");
-    let client = reqwest::Client::new();
-    let cli = client.get(url).basic_auth(&self.username, Some(&self.password)).send().await;
+    let cli = self
+      .req_client
+      .get(url)
+      .basic_auth(&self.username, Some(&self.password))
+      .send()
+      .await;
 
     match cli {
       Ok(resp) => match resp.json::<BettercapSession>().await {
@@ -188,10 +201,7 @@ impl Bettercap {
           None
         }
       },
-      Err(e) => {
-        LOGGER.log_error("Bettercap", &format!("HTTP request failed: {e}"));
-        None
-      }
+      Err(_) => None,
     }
   }
 
@@ -213,17 +223,13 @@ impl Bettercap {
               Ok(Message::Text(txt)) => {
                 let _ = self.event_tx.send(txt.to_string());
               }
-              Ok(Message::Binary(_)) => {
-                LOGGER.log_debug("Bettercap", "Ignoring binary WS frame");
-              }
-              Ok(Message::Ping(_) | Message::Pong(_) | Message::Frame(_)) => {}
+              Ok(Message::Binary(_) | Message::Ping(_) | Message::Pong(_) | Message::Frame(_)) => {}
               Ok(Message::Close(_)) => {
                 LOGGER.log_warning("Bettercap", "WebSocket closed by server");
                 self.is_ready.store(false, Ordering::SeqCst);
                 break;
               }
-              Err(e) => {
-                LOGGER.log_error("Bettercap", &format!("WebSocket error: {e}"));
+              Err(_e) => {
                 self.is_ready.store(false, Ordering::SeqCst);
                 // Still there?
                 if let Err(ping_err) = write.send(Message::Ping(vec![].into())).await {
@@ -236,11 +242,9 @@ impl Bettercap {
             }
           }
         }
-        Err(e) => {
-          LOGGER.log_error("Bettercap", &format!("WebSocket connect failed: {e}"));
-        }
+        Err(_e) => {}
       }
-      let sleep_time = (max_sleep - min_sleep).mul_add(rand::random::<f64>(), min_sleep);
+      let sleep_time = (max_sleep - min_sleep).mul_add(fastrand::f64(), min_sleep);
       LOGGER.log_info("Bettercap", &format!("Reconnecting in {sleep_time:.1} seconds"));
       tokio::time::sleep(Duration::from_secs_f64(sleep_time)).await;
     }
@@ -269,13 +273,13 @@ impl Bettercap {
       .replace("%{hostname}", &self.hostname)
       .replace("%{port}", &self.port.to_string())
       + "/session".trim_end_matches('/');
-    let client = reqwest::Client::new();
+
     let mut retries_left = self.retries;
 
     loop {
       LOGGER.log_debug("Bettercap", &format!("Commanding Bettercap to {cmd}"));
-
-      let req = client
+      let req = self
+        .req_client
         .post(&url)
         .json(&serde_json::json!({"cmd": cmd}))
         .basic_auth(&self.username, Some(&self.password))

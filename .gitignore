@@ -1,2 +1,6 @@
 /target
 /test
+perf.data
+heaptrack.*
+*.log
+

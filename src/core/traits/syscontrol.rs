@@ -1,3 +1,4 @@
+#![allow(clippy::missing_errors_doc)]
 pub trait SysControl {
   fn shutdown(&self) -> Result<(), Box<dyn std::error::Error>>;
 

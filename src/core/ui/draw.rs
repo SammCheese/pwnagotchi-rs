@@ -5,7 +5,7 @@
   clippy::cast_sign_loss
 )]
 
-use cosmic_text::{Attrs, Buffer, CacheKeyFlags, Color, Family, Metrics, Shaping, Weight};
+use cosmic_text::{Attrs, Buffer, Color, Family, Metrics, Shaping, Weight};
 use image::{Rgba, RgbaImage};
 
 use crate::core::{
@@ -73,7 +73,6 @@ pub fn draw_text_mut(
   buffer.set_size(Some(avail_w), Some(avail_h));
 
   let mut attrs = Attrs::new().family(Family::Name(&resolved_family));
-  attrs = attrs.cache_key_flags(CacheKeyFlags::DISABLE_HINTING);
   attrs = attrs.weight(style);
 
   buffer.set_text(content, &attrs, Shaping::Advanced);
