@@ -21,7 +21,7 @@ pub struct TextStyle {
 impl Default for TextStyle {
   fn default() -> Self {
     Self {
-      font: "Sans-Serif".to_string(),
+      font: "DejaVu Sans Mono".to_string(),
       color: Rgba([0, 0, 0, 255]),
       size: 14.0,
       weight: cosmic_text::Weight::NORMAL,

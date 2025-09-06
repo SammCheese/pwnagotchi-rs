@@ -52,8 +52,6 @@ tower-http = { version = "0.6.6", features = ["fs", "trace"] }
 image = "0.25.8"
 imageproc = "0.25.0"
 cosmic-text = "0.14.2"
-
-fontdb = "0.23.0"
 mime_guess = "2.0.5"
 tera = "1.20.0"
 time = {version = "0.3.43", features = ["formatting", "parsing", "macros", "serde"]}

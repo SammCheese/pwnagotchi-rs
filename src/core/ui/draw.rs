@@ -51,7 +51,7 @@ pub fn draw_text_mut(
       .faces()
       .next()
       .and_then(|f| f.families.first().map(|(name, _)| name.clone()))
-      .unwrap_or_else(|| "Sans-Serif".to_string());
+      .unwrap_or_else(|| "DejaVu Sans Mono".to_string());
 
     LOGGER.log_warning("Fonts", &format!("Font '{font}' not found, using '{fallback}'."));
 
