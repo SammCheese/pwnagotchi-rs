@@ -101,7 +101,10 @@ async fn handle_handshake_event(
     .to_string();
   let key = format!("{ap_mac} -> {sta_mac}");
 
-  let text = match session.state.write().handshakes.entry(key) {
+  let mut state = session.state.write(); // hold write lock once
+
+  let entry = state.handshakes.entry(key);
+  let text = match entry {
     std::collections::hash_map::Entry::Occupied(_) => {
       LOGGER.log_debug("Agent", &format!("Handshake already exists for {ap_mac} -> {sta_mac}"));
       return;
@@ -109,22 +112,21 @@ async fn handle_handshake_event(
     std::collections::hash_map::Entry::Vacant(entry) => {
       LOGGER
         .log_warning("Agent", &format!("!!! captured new handshake: {ap_mac} -> {sta_mac} !!!"));
-
       entry.insert(Handshake {
         mac: ap_mac,
         filename,
         timestamp: std::time::SystemTime::now(),
       });
 
-      session.state.write().last_pwned = Some(sta_mac.into());
-
+      state.last_pwned = Some(sta_mac.into());
       let total = total_unique_handshakes(&config().main.handshakes_path);
-      let handshake_count = &session.state.read().handshakes.len();
-      let mut text = format!("{handshake_count} ({total:02})");
+      let handshake_count = state.handshakes.len();
 
-      if let Some(last_pwned) = &session.state.read().last_pwned {
+      let mut text = format!("{handshake_count} ({total:02})");
+      if let Some(last_pwned) = &state.last_pwned {
         let _ = write!(text, " [{last_pwned}]");
       }
+      drop(state);
       text
     }
   };

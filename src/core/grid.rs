@@ -2,7 +2,9 @@ const API_ADDRESS: &str = "http://127.0.0.1:8666/api/v1/";
 
 use std::sync::LazyLock;
 
-use crate::core::{log::LOGGER, sessions::lastsession::LastSession};
+use crate::core::{
+  log::LOGGER, mesh::advertiser::Advertisement, sessions::lastsession::LastSession,
+};
 
 static CLIENT: LazyLock<reqwest::Client> = LazyLock::new(reqwest::Client::new);
 
@@ -16,7 +18,10 @@ pub async fn is_connected() -> bool {
   req.await.is_ok()
 }
 
-pub async fn call(endpoint: &str, data: serde_json::Value) -> Option<serde_json::Value> {
+pub async fn call<T>(endpoint: &str, data: serde_json::Value) -> Option<T>
+where
+  T: serde::de::DeserializeOwned,
+{
   let url = format!("{API_ADDRESS}/{endpoint}");
 
   let req = if data.is_null() {
@@ -35,14 +40,14 @@ pub async fn call(endpoint: &str, data: serde_json::Value) -> Option<serde_json:
   };
 
   match req.await {
-    Ok(resp) => resp.json::<serde_json::Value>().await.ok(),
+    Ok(resp) => resp.json::<T>().await.ok(),
     Err(_) => None,
   }
 }
 
 pub async fn advertise(enabled: Option<bool>) -> Option<serde_json::Value> {
-  let enabled = enabled.or(Some(true));
-  call("mesh/{advertise}", serde_json::json!({ "enabled": enabled })).await
+  let enabled = enabled.unwrap_or(true);
+  call(&format!("mesh/{enabled}"), serde_json::Value::Null).await
 }
 
 pub async fn set_advertisement_data(data: serde_json::Value) -> Option<serde_json::Value> {
@@ -57,7 +62,21 @@ pub async fn memory() -> Option<serde_json::Value> {
   call("system/memory", serde_json::Value::Null).await
 }
 
-pub async fn peers() -> Option<serde_json::Value> {
+#[derive(serde::Deserialize, serde::Serialize, Clone)]
+pub struct PeerResponse {
+  pub fingerprint: Option<String>,
+  pub met_at: Option<String>,
+  pub encounters: Option<u32>,
+  pub prev_seen_at: Option<String>,
+  pub detected_at: Option<String>,
+  pub seen_at: Option<String>,
+  pub channel: Option<u8>,
+  pub rssi: Option<i16>,
+  pub session_id: Option<String>,
+  pub advertisement: Option<Advertisement>,
+}
+
+pub async fn peers() -> Option<Vec<PeerResponse>> {
   call("mesh/peers", serde_json::Value::Null).await
 }
 
@@ -66,13 +85,9 @@ pub async fn peers() -> Option<serde_json::Value> {
 /// # Panics
 ///
 /// This function will panic if the value returned by `peers()` is not an array.
-pub async fn closest_peer() -> Option<serde_json::Value> {
+pub async fn closest_peer() -> Option<PeerResponse> {
   let all = peers().await?;
-  if all.is_array() && !all.as_array().unwrap().is_empty() {
-    all.as_array().unwrap().first().cloned()
-  } else {
-    None
-  }
+  if all.is_empty() { None } else { Some(all.first().cloned().unwrap()) }
 }
 
 pub async fn update_data(last_session: LastSession) {
@@ -90,17 +105,17 @@ pub async fn update_data(last_session: LastSession) {
       "handshakes": last_session.handshakes,
       "peers": last_session.peers,
     },
-    "uname": "",
+    "uname": "linux",
     "version": env!("CARGO_PKG_VERSION"),
     "build": "Pwnagotchi-rs by Sammy!",
     "plugins": [],
     "language": "en",
     "bettercap": "1.0.0",
-    "opwngrid": "0.1.0",
+    "opwngrid": "1.1.0",
   });
 
   LOGGER.log_debug("GRID", "Updating Grid Data!");
-  call("data", data).await;
+  call::<()>("data", data).await;
 }
 
 pub async fn report_ap(essid: &str, bssid: &str) {
@@ -110,7 +125,7 @@ pub async fn report_ap(essid: &str, bssid: &str) {
   });
 
   LOGGER.log_debug("GRID", &format!("Reporting AP {essid} ({bssid})"));
-  call("report/ap", data).await;
+  call::<()>("report/ap", data).await;
 }
 
 pub async fn inbox(page: Option<u32>, with_pager: Option<bool>) -> Option<serde_json::Value> {

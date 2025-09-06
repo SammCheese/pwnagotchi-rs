@@ -1,6 +1,6 @@
 use std::{borrow::Cow, collections::HashMap};
 
-use crate::core::{mesh::advertiser::Advertisement, models::bettercap::Meta};
+use crate::core::models::bettercap::Meta;
 
 #[derive(serde::Deserialize, Debug, Clone)]
 
@@ -48,16 +48,6 @@ pub struct AccessPoint {
   pub wps: HashMap<String, String>,
   pub clients: Vec<Station>,
   pub handshake: bool,
-}
-
-#[derive(Debug, Clone)]
-
-pub struct Peer {
-  pub session_id: Cow<'static, str>,
-  pub channel: u8,
-  pub rssi: i32,
-  pub identity: Cow<'static, str>,
-  pub advertisement: Advertisement,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

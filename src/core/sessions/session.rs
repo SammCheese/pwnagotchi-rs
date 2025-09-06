@@ -4,7 +4,8 @@ use parking_lot::RwLock;
 
 use crate::core::{
   agent::RunningMode,
-  models::net::{AccessPoint, Handshake, Peer},
+  mesh::peer::Peer,
+  models::net::{AccessPoint, Handshake},
 };
 
 #[derive(Debug, Clone)]

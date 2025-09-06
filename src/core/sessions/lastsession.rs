@@ -7,8 +7,12 @@ use hex::ToHex;
 use time::{UtcDateTime, macros::format_description};
 
 use crate::core::{
-  config::config, log::LOGGER, mesh::advertiser::Advertisement, models::net::Peer, ui::view::View,
-  utils::format_duration_human, voice::Voice,
+  config::config,
+  log::LOGGER,
+  mesh::{advertiser::Advertisement, peer::Peer},
+  ui::view::View,
+  utils::format_duration_human,
+  voice::Voice,
 };
 
 const EPOCH_TOKEN: &str = r"[epoch ";
@@ -298,11 +302,16 @@ impl LastSession {
 
       if !cache.contains_key(&pubkey) {
         self.last_peer = Some(Peer {
-          session_id: sid.into(),
-          channel: 1,
-          rssi: rssi.parse::<i32>().unwrap_or(0),
-          identity: pubkey.into(),
-          advertisement: Advertisement {
+          session_id: sid,
+          last_channel: 1,
+          rssi: rssi.parse::<i16>().unwrap_or(0),
+          encounters: 1,
+          first_met: None,
+          first_seen: None,
+          prev_seen: None,
+          last_seen: None,
+          adv: Advertisement {
+            identity: pubkey,
             name,
             pwnd_total: pwnd_tot,
             ..Advertisement::default()

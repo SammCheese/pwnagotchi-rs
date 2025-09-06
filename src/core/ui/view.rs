@@ -11,7 +11,8 @@ use crate::core::{
   automata::Automata,
   config::config,
   log::LOGGER,
-  models::net::{AccessPoint, Peer, Station},
+  mesh::peer::Peer,
+  models::net::{AccessPoint, Station},
   sessions::lastsession::LastSession,
   traits::agentobserver::AgentObserver,
   ui::{
@@ -24,8 +25,7 @@ use crate::core::{
   voice::Voice,
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum FaceType {
   LookR,
   LookL,

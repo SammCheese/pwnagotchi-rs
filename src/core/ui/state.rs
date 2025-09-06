@@ -7,8 +7,7 @@ use crate::core::ui::{components::Widget, view::FaceType};
 
 type Listener<T> = Box<dyn Fn(T, T) + Send + Sync>;
 
-#[derive(Clone, PartialEq, Eq)]
-
+#[derive(Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, Debug)]
 pub enum StateValue {
   None,
   Face(FaceType),

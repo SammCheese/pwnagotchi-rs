@@ -16,8 +16,8 @@ use crate::core::{
   ai::reward::RewardFunction,
   config::config,
   log::LOGGER,
-  mesh::wifi,
-  models::net::{AccessPoint, Peer},
+  mesh::{peer::Peer, wifi},
+  models::net::AccessPoint,
 };
 
 pub struct Epoch {
@@ -207,7 +207,7 @@ impl Epoch {
     }
 
     for peer in peers {
-      let ch_idx = peer.channel - 1;
+      let ch_idx = peer.last_channel - 1;
       if ch_idx < num_channels as u8 {
         peers_per_chan[ch_idx as usize] += 1.0;
       }

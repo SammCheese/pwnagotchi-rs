@@ -1,5 +1,5 @@
 use std::{
-  path,
+  path::{self, Path},
   process::{Command, exit},
 };
 
@@ -8,6 +8,7 @@ use nix::libc::EXIT_FAILURE;
 use rsa::{
   Pss, RsaPrivateKey, RsaPublicKey,
   pkcs1::{DecodeRsaPrivateKey, EncodeRsaPublicKey},
+  pkcs8::DecodePublicKey,
   rand_core::OsRng,
   traits::SignatureScheme,
 };
@@ -92,6 +93,7 @@ impl Identity {
           LOGGER.log_error("IDENTITY", &format!("Key load failed: {e}. Regenerating..."));
 
           let _ = Command::new("pwngrid").arg("-generate").arg("-keys").arg(&self.path).status();
+          old_header_fix(Path::new(&self.pub_path));
         }
       }
 
@@ -109,7 +111,7 @@ impl Identity {
 
   fn try_load_keys(&mut self) -> Result<(), Box<dyn std::error::Error>> {
     let priv_key = RsaPrivateKey::read_pkcs1_pem_file(&self.priv_path)?;
-    let pub_key = RsaPublicKey::from(&priv_key);
+    let pub_key = RsaPublicKey::read_public_key_pem_file(&self.pub_path)?;
 
     self.priv_key = Some(priv_key);
     self.pub_key = Some(pub_key.clone());
@@ -150,5 +152,19 @@ impl Identity {
     let signature_b64 = general_purpose::STANDARD.encode(&signature);
 
     Ok(signature_b64)
+  }
+}
+
+fn old_header_fix(path: &Path) {
+  if let Ok(metadata) = std::fs::metadata(path)
+    && metadata.is_file()
+    && let Ok(content) = std::fs::read_to_string(path)
+  {
+    let fixed = content
+      .replace("-----BEGIN RSA PUBLIC KEY-----", "-----BEGIN PUBLIC KEY-----")
+      .replace("-----END RSA PUBLIC KEY-----", "-----END PUBLIC KEY-----");
+    if fixed != content {
+      let _ = std::fs::write(path, fixed);
+    }
   }
 }

@@ -4,6 +4,7 @@ use std::{process::exit, sync::Arc};
 
 use clap::Parser;
 use nix::libc::EXIT_SUCCESS;
+use parking_lot::Mutex;
 use pwnagotchi_rs::core::{
   agent::Agent,
   ai::Epoch,
@@ -14,6 +15,7 @@ use pwnagotchi_rs::core::{
   events::eventlistener::start_event_loop,
   identity::Identity,
   log::LOGGER,
+  mesh::advertiser::{AsyncAdvertiser, start_advertising},
   sessions::manager::SessionManager,
   traits::bettercapcontroller::BettercapController,
   ui::{
@@ -95,8 +97,12 @@ async fn main() {
   let agent = Arc::new(Agent::new(&auto_handle, &agent_bc, &epoch, &view));
 
   // ADVERTISER
-  //let adv = Arc::new(AsyncAdvertiser::new(Arc::clone(&epoch), &identity,
-  // &view));
+  let advertiser_view = Arc::clone(&view);
+  let adv = Arc::new(Mutex::new(AsyncAdvertiser::new(
+    Arc::clone(&epoch),
+    &identity,
+    Some(advertiser_view),
+  )));
 
   // Render Changes to UI
   let view_clone = Arc::clone(&view);
@@ -130,9 +136,12 @@ async fn main() {
   });
 
   // Advertiser
-  /*tokio::task::spawn(async move {
-    adv.start_advertising(&sm, &view).await;
-  });*/
+  let aadv = Arc::clone(&adv);
+  let asm = Arc::clone(&sm);
+  let aview = Arc::clone(&view);
+  tokio::task::spawn(async move {
+    start_advertising(&aadv, &asm, &aview).await;
+  });
 
   LOGGER.log_info(
     "Pwnagotchi",

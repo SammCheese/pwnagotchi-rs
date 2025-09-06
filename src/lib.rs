@@ -30,11 +30,16 @@ pub mod core {
   pub mod grid;
   pub mod identity;
   pub mod log;
-  pub mod mesh;
   pub mod models;
   pub mod setup;
   pub mod utils;
   pub mod voice;
+
+  pub mod mesh {
+    pub mod advertiser;
+    pub mod peer;
+    pub mod wifi;
+  }
 
   pub mod ui {
     pub mod components;

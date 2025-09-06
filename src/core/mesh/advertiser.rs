@@ -7,9 +7,10 @@ use parking_lot::Mutex;
 use crate::core::{
   ai::Epoch,
   config::{PersonalityConfig, config},
-  grid::{advertise, set_advertisement_data},
+  grid::{advertise, peers, set_advertisement_data},
   identity::Identity,
   log::LOGGER,
+  mesh::peer::Peer,
   sessions::manager::SessionManager,
   ui::{state::StateValue, view::View},
   utils::{self},
@@ -18,7 +19,8 @@ use crate::core::{
 pub struct AsyncAdvertiser {
   pub epoch: Arc<Mutex<Epoch>>,
   pub advertisement: Advertisement,
-  pub peers: HashMap<String, Advertisement>,
+  pub view: Option<Arc<View>>,
+  pub peers: HashMap<String, Peer>,
   pub closest_peer: Option<String>,
 }
 
@@ -36,7 +38,7 @@ pub struct Advertisement {
 }
 
 impl AsyncAdvertiser {
-  pub fn new(epoch: Arc<Mutex<Epoch>>, identity: &Identity) -> Self {
+  pub fn new(epoch: Arc<Mutex<Epoch>>, identity: &Identity, view: Option<Arc<View>>) -> Self {
     let advertisement = Advertisement {
       name: config().main.name.to_string(),
       version: env!("CARGO_PKG_VERSION").to_string(),
@@ -51,10 +53,15 @@ impl AsyncAdvertiser {
 
     Self {
       epoch,
+      view,
       advertisement,
       peers: HashMap::new(),
       closest_peer: None,
     }
+  }
+
+  pub fn fingerprint(&self) -> &str {
+    &self.advertisement.identity
   }
 
   async fn update_advertisement(&mut self, sm: &Arc<SessionManager>) {
@@ -66,18 +73,6 @@ impl AsyncAdvertiser {
     set_advertisement_data(serde_json::to_value(self.advertisement.clone()).unwrap()).await;
   }
 
-  pub async fn start_advertising(self, _sm: &Arc<SessionManager>, view: &Arc<View>) {
-    if config().personality.advertise {
-      set_advertisement_data(serde_json::to_value(self.advertisement.clone()).unwrap_or_default())
-        .await;
-      advertise(Some(true)).await;
-      let advertiser = Arc::new(Mutex::new(self));
-      let advertiser_clone = Arc::clone(&advertiser);
-      view
-        .on_state_change("face", move |old, new| advertiser_clone.lock().on_face_change(old, new));
-    }
-  }
-
   fn on_face_change(&mut self, _old: StateValue, new: StateValue) {
     let StateValue::Text(new) = new else {
       return;
@@ -87,7 +82,7 @@ impl AsyncAdvertiser {
       self.advertisement.face = face_str;
     }
 
-    tokio::spawn({
+    tokio::task::spawn({
       let advertisement = self.advertisement.clone();
       async move {
         set_advertisement_data(serde_json::to_value(advertisement).unwrap_or_default()).await;
@@ -95,23 +90,80 @@ impl AsyncAdvertiser {
     });
   }
 
-  /*fn on_face_change(&self, _old: String, _new: String) {
-      //self.advertisement.face = new.clone();
-      // TODO: Update Grid
+  pub fn cumulative_encounters(&self) -> u32 {
+    self.peers.values().map(|p| p.encounters).sum()
   }
 
-  fn on_new_peer(&self, _peer: Peer) {
-      //LOGGER.log_info("GRID", &format!("new peer {} detected ({} encounters)", peer.name, peer.encounters));
-  }*/
+  fn on_new_peer(&self, peer: &Peer) {
+    if let Some(view) = &self.view {
+      view.on_new_peer(peer);
+    }
+  }
 
-  pub async fn advertisement_poller(&self) {
+  fn on_lost_peer(&self, peer: &Peer) {
+    if let Some(view) = &self.view {
+      view.on_lost_peer(peer);
+    }
+  }
+
+  pub async fn advertisement_poller(&mut self) {
     tokio::time::sleep(std::time::Duration::from_secs(20)).await;
     loop {
       LOGGER.log_debug("GRID", "Polling pwngrid-peer for peers...");
 
-      // Do stuff
+      let peers_opt = peers().await;
+      let mut new_peers = HashMap::new();
+      self.closest_peer = None;
+
+      if let Some(peers_vec) = peers_opt {
+        for p in &peers_vec {
+          let peer = Peer::new(p);
+          new_peers.insert(p.fingerprint.clone().unwrap_or_default(), peer.clone());
+          if self.closest_peer.is_none()
+            || peer.rssi
+              > self.peers.get(self.closest_peer.as_ref().unwrap()).map_or(-100, |p| p.rssi)
+          {
+            self.closest_peer = Some(p.fingerprint.clone().unwrap_or_default());
+          }
+        }
+      }
+
+      let to_delete = self
+        .peers
+        .keys()
+        .filter(|k| !new_peers.contains_key(*k))
+        .cloned()
+        .collect::<Vec<_>>();
+
+      for k in to_delete {
+        if let Some(p) = self.peers.remove(&k) {
+          self.on_lost_peer(&p);
+        }
+      }
+
+      for (k, v) in &new_peers {
+        if !self.peers.contains_key(k) {
+          self.on_new_peer(v);
+        } else if let Some(existing_peer) = self.peers.get_mut(k) {
+          existing_peer.update(v);
+        }
+      }
 
       tokio::time::sleep(std::time::Duration::from_secs(3)).await;
     }
+  }
+}
+
+pub async fn start_advertising(
+  advertiser: &Arc<Mutex<AsyncAdvertiser>>,
+  _sm: &Arc<SessionManager>,
+  view: &Arc<View>,
+) {
+  if config().personality.advertise {
+    let value = advertiser.lock().advertisement.clone();
+    set_advertisement_data(serde_json::to_value(value).unwrap_or_default()).await;
+    advertise(Some(true)).await;
+    let advertiser_clone = Arc::clone(advertiser);
+    view.on_state_change("face", move |old, new| advertiser_clone.lock().on_face_change(old, new));
   }
 }
