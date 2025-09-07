@@ -35,11 +35,17 @@ pub struct Peer {
 }
 
 impl Peer {
+  /// Creates a new Peer from a `PeerResponse`.
+  ///
+  /// # Errors
+  ///
+  /// This function will use a fallback if the time format description cannot be
+  /// parsed.
   pub fn new(data: &PeerResponse) -> Self {
     let now = OffsetDateTime::now_utc();
-    let format =
-      time::format_description::parse("[year]-[month]-[day]T[hour]:[minute]:[second]").unwrap();
-    let just_met = now.format(&format).unwrap();
+    let format = time::format_description::parse("[year]-[month]-[day]T[hour]:[minute]:[second]")
+      .unwrap_or_else(|_| Vec::new());
+    let just_met = now.format(&format).unwrap_or_else(|_| now.to_string());
 
     let data = data.clone();
 

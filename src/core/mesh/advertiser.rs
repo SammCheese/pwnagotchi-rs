@@ -119,10 +119,12 @@ impl AsyncAdvertiser {
         for p in &peers_vec {
           let peer = Peer::new(p);
           new_peers.insert(p.fingerprint.clone().unwrap_or_default(), peer.clone());
-          if self.closest_peer.is_none()
-            || peer.rssi
-              > self.peers.get(self.closest_peer.as_ref().unwrap()).map_or(-100, |p| p.rssi)
-          {
+          let is_closer = if let Some(ref closest) = self.closest_peer {
+            peer.rssi > self.peers.get(closest).map_or(-100, |p| p.rssi)
+          } else {
+            true
+          };
+          if is_closer {
             self.closest_peer = Some(p.fingerprint.clone().unwrap_or_default());
           }
         }

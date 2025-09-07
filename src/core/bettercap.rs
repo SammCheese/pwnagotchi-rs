@@ -7,6 +7,7 @@ use std::{
   time::Duration,
 };
 
+use base64::{Engine, engine::general_purpose};
 use futures_util::{SinkExt, StreamExt};
 use tokio::{
   net::TcpStream,
@@ -15,6 +16,11 @@ use tokio::{
 use tokio_stream::wrappers::SplitStream;
 use tokio_tungstenite::{
   MaybeTlsStream, WebSocketStream, connect_async, tungstenite::protocol::Message,
+};
+use ureq::{
+  Agent, Body, SendBody,
+  http::{Request, Response, header::HeaderValue},
+  middleware::MiddlewareNext,
 };
 
 use crate::core::{
@@ -42,7 +48,7 @@ pub struct Bettercap {
   scheme: Cow<'static, str>,
 
   event_tx: broadcast::Sender<String>,
-  req_client: reqwest::Client,
+  req_client: Agent,
 }
 
 pub enum BettercapCommand {
@@ -105,7 +111,7 @@ pub fn spawn_bettercap(bc: &Arc<Bettercap>) -> BettercapHandle {
           let _ = respond_to.send(res);
         }
         BettercapCommand::GetSession { respond_to } => {
-          let _ = respond_to.send(bettercap.session(None).await);
+          let _ = respond_to.send(bettercap.session(None));
         }
         BettercapCommand::SubscribeEvents { respond_to } => {
           let _ = respond_to.send(bettercap.subscribe_events());
@@ -125,16 +131,35 @@ impl Default for Bettercap {
 
 type WsRead = SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>;
 
+fn bettercap_add_authorization(
+  mut req: Request<SendBody>,
+  next: MiddlewareNext,
+) -> Result<Response<Body>, ureq::Error> {
+  let username = config().bettercap.username.to_string();
+  let password = config().bettercap.password.to_string();
+  req.headers_mut().insert(
+    "Authorization",
+    HeaderValue::from_str(&format!(
+      "Basic {}",
+      general_purpose::STANDARD.encode(format!("{username}:{password}"))
+    ))
+    .unwrap(),
+  );
+  next.handle(req)
+}
+
 impl Bettercap {
   pub fn new() -> Self {
     let scheme = if config().bettercap.port == 443 { "https" } else { "http" };
     let ws_scheme = if config().bettercap.port == 443 { "wss" } else { "ws" };
     let max_queue = 10_000usize;
     let (event_tx, _rx) = broadcast::channel(max_queue);
-    let req_client = reqwest::Client::builder()
-      .timeout(Duration::from_secs(10))
-      .build()
-      .unwrap_or_default();
+
+    let agent_config = ureq::Agent::config_builder()
+      .timeout_global(Some(std::time::Duration::from_secs(10)))
+      .middleware(bettercap_add_authorization)
+      .build();
+    let req_client = Agent::new_with_config(agent_config);
 
     Self {
       bettercap_path: Cow::Borrowed(&config().main.bettercap_path),
@@ -175,7 +200,7 @@ impl Bettercap {
     self.is_ready.load(Ordering::SeqCst)
   }
 
-  pub async fn session(&self, sess: Option<&str>) -> Option<BettercapSession> {
+  pub fn session(&self, sess: Option<&str>) -> Option<BettercapSession> {
     let sess = sess.unwrap_or("session");
     let base = self
       .url
@@ -186,23 +211,15 @@ impl Bettercap {
       .replace("%{port}", &self.port.to_string());
 
     let url = format!("{base}/{sess}");
-    let cli = self
-      .req_client
-      .get(url)
-      .basic_auth(&self.username, Some(&self.password))
-      .send()
-      .await;
+    let cli = self.req_client.get(url).call();
 
-    match cli {
-      Ok(resp) => match resp.json::<BettercapSession>().await {
-        Ok(session) => Some(session),
-        Err(e) => {
-          LOGGER.log_error("Bettercap", &format!("Failed to parse session JSON: {e}"));
-          None
-        }
-      },
-      Err(_) => None,
-    }
+    cli.map_or(None, |mut resp| match resp.body_mut().read_json::<BettercapSession>() {
+      Ok(session) => Some(session),
+      Err(e) => {
+        LOGGER.log_error("Bettercap", &format!("Failed to parse session JSON: {e}"));
+        None
+      }
+    })
   }
 
   pub async fn run_websocket(&self) {
@@ -278,29 +295,29 @@ impl Bettercap {
 
     loop {
       LOGGER.log_debug("Bettercap", &format!("Commanding Bettercap to {cmd}"));
-      let req = self
+      let agent = self
         .req_client
         .post(&url)
-        .json(&serde_json::json!({"cmd": cmd}))
-        .basic_auth(&self.username, Some(&self.password))
-        .timeout(Duration::from_secs(2));
+        .config()
+        .timeout_global(Some(Duration::from_secs(2)))
+        .build();
+      let req = agent.send_json(serde_json::json!({"cmd": cmd}));
 
-      match req.send().await {
+      match req {
         Ok(resp) => {
           // Bad request could come from an already existing session + setup
-          if resp.status().is_success() || resp.status() == reqwest::StatusCode::BAD_REQUEST {
+          if resp.status().is_success() || resp.status() == 400 {
             return Ok(());
           }
           LOGGER.log_error("Bettercap", &format!("Request failed with status {}", resp.status()));
         }
-        Err(e) => {
-          if !e.is_connect() {
-            // The server clearly got the request but didnt like it
-            // Dont try this again.
-            return Ok(());
-          }
-          LOGGER.log_error("Bettercap", &format!("Request failed: {e}"));
+        Err(ureq::Error::StatusCode(400..410)) => {
+          // The server clearly got the request but didnt like it
+          // Dont try this again.
+          LOGGER.log_error("Bettercap", &format!("Bad Request to Bettercap: {cmd}"));
+          return Ok(());
         }
+        Err(_) => {}
       }
       if retries_left == 0 {
         return Err(anyhow::anyhow!("Request failed"));

@@ -1,24 +1,32 @@
-const API_ADDRESS: &str = "http://127.0.0.1:8666/api/v1/";
+const API_ADDRESS: &str = "http://127.0.0.1:8666/api/v1";
 
 use std::sync::LazyLock;
+
+use ureq::{Agent, config::Config};
 
 use crate::core::{
   log::LOGGER, mesh::advertiser::Advertisement, sessions::lastsession::LastSession,
 };
 
-static CLIENT: LazyLock<reqwest::Client> = LazyLock::new(reqwest::Client::new);
+static CONFIG: LazyLock<Config> = LazyLock::new(|| {
+  Agent::config_builder()
+    .timeout_global(Some(std::time::Duration::from_secs(10)))
+    .build()
+});
 
-pub async fn is_connected() -> bool {
+static CLIENT: LazyLock<Agent> = LazyLock::new(|| Agent::new_with_config(CONFIG.clone()));
+
+pub fn is_connected() -> bool {
   let host = "https://api.opwngrid.xyz/api/v1/uptime";
   let req = CLIENT
     .get(host)
     .header("User-Agent", format!("pwnagotchi-rs/{}", env!("CARGO_PKG_VERSION")))
-    .timeout(std::time::Duration::from_secs(30))
-    .send();
-  req.await.is_ok()
+    .call();
+
+  req.ok().is_some_and(|r| r.status() == 200)
 }
 
-pub async fn call<T>(endpoint: &str, data: serde_json::Value) -> Option<T>
+pub fn call<T>(endpoint: &str, data: &serde_json::Value) -> Option<T>
 where
   T: serde::de::DeserializeOwned,
 {
@@ -28,38 +36,51 @@ where
     CLIENT
       .get(&url)
       .header("User-Agent", format!("pwnagotchi-rs/{}", env!("CARGO_PKG_VERSION")))
-      .timeout(std::time::Duration::from_secs(10))
-      .send()
+      .call()
   } else {
     CLIENT
       .post(&url)
       .header("User-Agent", format!("pwnagotchi-rs/{}", env!("CARGO_PKG_VERSION")))
-      .json(&data)
-      .timeout(std::time::Duration::from_secs(10))
-      .send()
+      .send_json(data)
   };
 
-  match req.await {
-    Ok(resp) => resp.json::<T>().await.ok(),
-    Err(_) => None,
+  match req {
+    Ok(mut response) => {
+      if response.status() == 200 {
+        match response.body_mut().read_json() {
+          Ok(json) => Some(json),
+          Err(e) => {
+            LOGGER.log_error("GRID", &format!("Failed to parse JSON response: {e}"));
+            None
+          }
+        }
+      } else {
+        LOGGER.log_error("GRID", &format!("Request failed with status: {}", response.status()));
+        None
+      }
+    }
+    Err(e) => {
+      LOGGER.log_error("GRID", &format!("HTTP request error: {e}"));
+      None
+    }
   }
 }
 
 pub async fn advertise(enabled: Option<bool>) -> Option<serde_json::Value> {
   let enabled = enabled.unwrap_or(true);
-  call(&format!("mesh/{enabled}"), serde_json::Value::Null).await
+  call(&format!("mesh/{enabled}"), &serde_json::Value::Null)
 }
 
 pub async fn set_advertisement_data(data: serde_json::Value) -> Option<serde_json::Value> {
-  call("mesh/data", data).await
+  call("mesh/data", &data)
 }
 
-pub async fn get_advertisement_data() -> Option<serde_json::Value> {
-  call("mesh/data", serde_json::Value::Null).await
+pub fn get_advertisement_data() -> Option<serde_json::Value> {
+  call("mesh/data", &serde_json::Value::Null)
 }
 
-pub async fn memory() -> Option<serde_json::Value> {
-  call("system/memory", serde_json::Value::Null).await
+pub fn memory() -> Option<serde_json::Value> {
+  call("system/memory", &serde_json::Value::Null)
 }
 
 #[derive(serde::Deserialize, serde::Serialize, Clone)]
@@ -77,7 +98,7 @@ pub struct PeerResponse {
 }
 
 pub async fn peers() -> Option<Vec<PeerResponse>> {
-  call("mesh/peers", serde_json::Value::Null).await
+  call("mesh/peers", &serde_json::Value::Null)
 }
 
 /// Returns the closest peer from the list of peers, if any.
@@ -90,7 +111,7 @@ pub async fn closest_peer() -> Option<PeerResponse> {
   if all.is_empty() { None } else { Some(all.first().cloned().unwrap()) }
 }
 
-pub async fn update_data(last_session: LastSession) {
+pub fn update_data(last_session: &LastSession) {
   let data = serde_json::json!({
     "ai": "No AI!",
     "session": {
@@ -115,32 +136,32 @@ pub async fn update_data(last_session: LastSession) {
   });
 
   LOGGER.log_debug("GRID", "Updating Grid Data!");
-  call::<()>("data", data).await;
+  call::<()>("data", &data);
 }
 
-pub async fn report_ap(essid: &str, bssid: &str) {
+pub fn report_ap(essid: &str, bssid: &str) {
   let data = serde_json::json!({
     "essid": essid,
     "bssid": bssid,
   });
 
   LOGGER.log_debug("GRID", &format!("Reporting AP {essid} ({bssid})"));
-  call::<()>("report/ap", data).await;
+  call::<()>("report/ap", &data);
 }
 
-pub async fn inbox(page: Option<u32>, with_pager: Option<bool>) -> Option<serde_json::Value> {
+pub fn inbox(page: Option<u32>, with_pager: Option<bool>) -> Option<serde_json::Value> {
   let page = page.unwrap_or(1);
   let with_pager = with_pager.unwrap_or(false);
-  let res = call(&format!("inbox?p={page}"), serde_json::Value::Null).await;
+  let res = call(&format!("inbox?p={page}"), &serde_json::Value::Null);
   if with_pager { res } else { res.and_then(|r| r.get("messages").cloned()) }
 }
 
-pub async fn inbox_message(id: &str) -> Option<serde_json::Value> {
-  call(&format!("inbox/{id}"), serde_json::Value::Null).await
+pub fn inbox_message(id: &str) -> Option<serde_json::Value> {
+  call(&format!("inbox/{id}"), &serde_json::Value::Null)
 }
 
-pub async fn mark_message(id: &str, mark: String) -> Option<serde_json::Value> {
-  call(&format!("inbox/{id}/mark"), serde_json::json!({ "read": mark })).await
+pub fn mark_message(id: &str, mark: &str) -> Option<serde_json::Value> {
+  call(&format!("inbox/{id}/mark"), &serde_json::json!({ "read": mark }))
 }
 
 /*pub async fn send_message(to: &str, message: &str) -> Option<serde_json::Value> {
