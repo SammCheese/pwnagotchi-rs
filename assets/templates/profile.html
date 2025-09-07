@@ -1,11 +1,11 @@
 {% extends "base.html" %}
-{% set active_page = "profile" %}
 
 {% block title %}
 Profile
 {% endblock %}
 
-{% block script %}
+{% block extra_scripts %}
+<script type="text/javascript">
 $(function(){
     $('#qrcode').kjua({
         text: 'https://opwngrid.xyz/search/{{ fingerprint }}',
@@ -16,6 +16,7 @@ $(function(){
         fontcolor: '#000'
     });
 });
+</script>
 {% endblock %}
 
 {% block content %}

@@ -53,7 +53,8 @@ image = "0.25.8"
 imageproc = "0.25.0"
 cosmic-text = "0.14.2"
 mime_guess = "2.0.5"
-tera = "1.20.0"
 time = {version = "0.3.43", features = ["formatting", "parsing", "macros", "serde"]}
+askama = "0.14.0"
+filters = "0.4.0"
 
 

@@ -1,15 +1,12 @@
 {% extends "base.html" %}
-{% set active_page = "new" %}
 
 {% block title %}
-{% if to %}
-Reply to {{ to }}
-{% else %}
-New Message
-{% endif %}
+{% match to %}
+{% when Some with (t) %}Reply to {{ t }}{% when None %}New Message{% endmatch %}
 {% endblock %}
 
-{% block script %}
+{% block extra_scripts %}
+<script type="text/javascript">
 $(function(){
     $("#message_form").submit(function(e) {
           e.preventDefault();
@@ -38,17 +35,23 @@ $(function(){
         });
     });
 });
+</script>
 {% endblock %}
 
 {% block content %}
 <div style="padding: 1em">
     <form id="message_form" method="POST" action="/inbox/send">
-        <label for="to">To:</label>
-        <input type="text" name="to" id="to" value="{{ to }}">
+    <label for="to">To:</label>
+    {% match to %}
+    {% when Some with (t) %}
+    <input type="text" name="to" id="to" value="{{ t }}">
+    {% when None %}
+    <input type="text" name="to" id="to" value="">
+    {% endmatch %}
 
         <label for="message">Message:</label>
         <textarea cols="40" rows="8" name="message" id="message"></textarea>
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+        <input type="hidden" name="csrf_token"/>
         <input type="submit" class="button" value="Send"/>
     </form>
 </div>

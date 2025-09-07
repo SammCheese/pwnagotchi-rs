@@ -1,8 +1,7 @@
 {% extends "base.html" %}
-{% set active_page = "inbox" %}
 
 {% block title %}
-{{ name }} Inbox
+{{ title }} Inbox
 {% endblock %}
 
 {% block script %}
@@ -17,14 +16,15 @@ $(function() {
 <ul class="inbox" data-role="listview" data-filter="true" data-filter-placeholder="Search inbox..." data-inset="true">
     {% for message in inbox.messages %}
     <li class="message">
-        <a href="/inbox/{{ message.id }}" class="{% if not message.seen_at %}unread{% else %}read{% endif %}">
+    <a href="/inbox/{{ message.id }}" class="{% if message.seen %}read{% else %}unread{% endif %}">
             <h2>{{ message.sender_name }}@{{ message.sender }}</h2>
             <p>
                 Received
                 <time class="timeago" datetime="{{ message.created_at }}">{{ message.created_at }}</time>
-                {% if message.seen_at %}, seen
-                <time class="timeago" datetime="{{ message.seen_at }}">{{ message.seen_at }}</time>
-                {% endif %}.
+                {% match message.seen_at %}
+                {% when Some with (t) %}, seen
+                <time class="timeago" datetime="{{ t }}">{{ t }}</time>
+                {% when None %}{% endmatch %}.
             </p>
         </a>
     </li>

@@ -1,13 +1,11 @@
 {% extends "base.html" %}
-{% set active_page = "plugins" %}
 
 {% block title %}
 Plugins
 {% endblock %}
 
-{% block styles %}
-  {{ super() }}
-  <style>
+{% block extra_styles %}
+    <style>
   .tooltip {
     position: relative;
     display: inline-block;
@@ -33,10 +31,11 @@ Plugins
     visibility: visible;
   }
 
-  </style>
+    </style>
 {% endblock %}
 
-{% block script %}
+{% block extra_scripts %}
+<script type="text/javascript">
 $(function(){
     $('input[type=checkbox]').change(function(e) {
           var checkbox = $(this);
@@ -71,31 +70,30 @@ $(function(){
         });
     });
 });
+</script>
 {% endblock %}
 {% block content %}
 <div id="container">
-    {% for name in database_keys %}
-        {% set has_info = loaded[name].__description__ | default(value="") != "" %}
+    {% for p in plugins %}
         <div class="plugins-box">
             <div class="tooltip">
                 <h4>
-                    <a {% if name in loaded and loaded[name].on_webhook is defined %} href="/plugins/{{name}}" {% endif %}>{{name}}</a>
+                    <a {% if p.has_webhook %} href="/plugins/{{ p.name }}" {% endif %}>{{ p.name }}</a>
                 </h4>
-                {% if has_info %}
-                    <span class="tooltiptext">{{ loaded[name].__description__ }}</span>
-                {% else %}
-                    <span class="tooltiptext">Description can't be loaded yet.</span>
-                {% endif %}
+                {% match p.description %}
+                  {% when Some with (desc) %}<span class="tooltiptext">{{ desc }}</span>
+                  {% when None %}<span class="tooltiptext">Description can't be loaded yet.</span>
+                {% endmatch %}
             </div>
             <form method="POST" action="/plugins/toggle">
-                <input type="checkbox" data-role="flipswitch" name="enabled" id="flip-checkbox-{{name}}" data-on-text="Enabled" data-off-text="Disabled" data-wrapper-class="custom-size-flipswitch" {% if name in loaded %} checked {% endif %}>
-                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
-                <input type="hidden" name="plugin" value="{{ name }}"/>
+                <input type="checkbox" data-role="flipswitch" name="enabled" id="flip-checkbox-{{ p.name }}" data-on-text="Enabled" data-off-text="Disabled" data-wrapper-class="custom-size-flipswitch" {% if p.enabled %} checked {% endif %}>
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}"/>
+                <input type="hidden" name="plugin" value="{{ p.name }}"/>
             </form>
             <form method="POST" action="/plugins/upgrade">
                 <input type="submit" name="upgrade" value="Upgrade">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
-                <input type="hidden" name="plugin" value="{{ name }}"/>
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}"/>
+                <input type="hidden" name="plugin" value="{{ p.name }}"/>
             </form>
         </div>
     {% endfor %}

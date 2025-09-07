@@ -1,4 +1,4 @@
-use std::{borrow::Cow, sync::Arc};
+use std::borrow::Cow;
 
 use axum::{
   Router,
@@ -8,12 +8,14 @@ use axum::{
   routing::get,
 };
 use include_dir::{Dir, include_dir};
-use tera::Tera;
 
 use crate::core::{
   config::config,
   log::LOGGER,
-  ui::old::web::routes::{inbox_handler, index_handler, ui},
+  ui::old::web::routes::{
+    inbox_handler, index_handler, message_handler, new_message_handler, peers_handler,
+    plugins_handler, profile_handler, status_handler, ui,
+  },
 };
 
 pub static TEMPLATE_ASSETS: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/assets/templates");
@@ -48,9 +50,7 @@ impl Server {
       let addr = format!("{}:{}", self.address, self.port);
 
       tokio::spawn(async move {
-        let tera = Arc::new(build_tera_from_include_dir());
-
-        let app = build_router(tera);
+        let app = build_router();
 
         match tokio::net::TcpListener::bind(&addr).await {
           Ok(listener) => {
@@ -67,24 +67,27 @@ impl Server {
   }
 
   pub const fn stop(&self) {
-    // Stop the server
+    // TODO: Stop the server
   }
 }
 
-pub fn build_router(tera: Arc<Tera>) -> Router {
+pub fn build_router() -> Router {
   Router::new()
     // Template routes
     .route("/", get(index_handler))
-    .route("/index.html", get(index_handler))
-    .route("/inbox.html", get(inbox_handler))
+    .route("/index", get(index_handler))
+    .route("/inbox", get(inbox_handler))
+    .route("/inbox/new", get(new_message_handler))
+    .route("/inbox/peers", get(peers_handler))
+    .route("/plugins", get(plugins_handler))
+    .route("/inbox/profile", get(profile_handler))
+    .route("/status", get(status_handler))
+    .route("/message", get(message_handler))
     .route("/ui", get(ui))
     .route("/{*path}", get(static_handler))
-    // Tera extension
-    .layer(axum::Extension(tera))
 }
 
 pub async fn static_handler(Path(path): Path<String>) -> Response {
-  // allow /index.html etc.
   let path = if path.is_empty() { "index.html" } else { path.as_str() };
 
   STATIC_ASSETS.get_file(path).map_or_else(
@@ -99,30 +102,4 @@ pub async fn static_handler(Path(path): Path<String>) -> Response {
         .unwrap_or_else(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Failed").into_response())
     },
   )
-}
-
-fn build_tera_from_include_dir() -> Tera {
-  let mut templates = Vec::new();
-
-  for file in TEMPLATE_ASSETS.files() {
-    let Some(path) = file.path().to_str() else {
-      eprintln!("Failed to convert path to str");
-
-      continue;
-    };
-
-    if let Ok(contents) = std::str::from_utf8(file.contents()) {
-      templates.push((path, contents.to_string()));
-    } else {
-      eprintln!("Failed to parse template file '{path}' as UTF-8");
-    }
-  }
-
-  let mut tera = Tera::default();
-
-  tera.add_raw_templates(templates).unwrap_or_else(|e| {
-    eprintln!("Failed to add templates to Tera: {e}");
-  });
-
-  tera
 }

@@ -1,18 +1,19 @@
 {% extends "base.html" %}
-{% set active_page = "home" %}
 
 {% block title %}
 {{ title }}
 {% endblock %}
 
-{% block script %}
+{% block extra_scripts %}
+<script type="text/javascript">
 window.onload = function() {
-    var image = document.getElementById("ui");
-    function updateImage() {
-        image.src = image.src.split("?")[0] + "?" + new Date().getTime();
-    }
-    setInterval(updateImage, 1000);
+	var image = document.getElementById("ui");
+	function updateImage() {
+		image.src = image.src.split("?")[0] + "?" + new Date().getTime();
+	}
+	setInterval(updateImage, 1000);
 }
+</script>
 {% endblock %}
 
 {% block content %}
