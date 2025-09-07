@@ -51,7 +51,7 @@ impl Default for Identity {
 }
 
 impl Identity {
-  pub async fn new() -> Self {
+  pub fn new() -> Self {
     let path = config().identity.path.to_string();
     let priv_path = format!("{path}id_rsa");
     let pub_path = format!("{priv_path}.pub");
@@ -68,13 +68,13 @@ impl Identity {
       fingerprint: None,
     };
 
-    ident.initialize().await;
+    ident.initialize();
     ident
   }
 
-  pub async fn initialize(&mut self) {
+  pub fn initialize(&mut self) {
     if !path::Path::new(&self.path).exists()
-      && let Err(e) = tokio::fs::create_dir_all(&self.path).await
+      && let Err(e) = std::fs::create_dir_all(&self.path)
     {
       LOGGER.log_error(
         "IDENTITY",

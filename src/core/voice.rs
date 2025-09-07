@@ -1,6 +1,7 @@
 use std::fmt::Write;
 
 use crate::core::{
+  mesh::peer::Peer,
   models::net::{AccessPoint, Station},
   sessions::lastsession::LastSession,
   utils::{STAP, hostname_or_mac, random_choice},
@@ -117,24 +118,24 @@ impl Voice {
     ])
   }
 
-  /*pub fn on_new_peer(&self, peer: &Peer) -> &str {
-    if peer.first_encounter() {
+  pub fn on_new_peer(&self, peer: &Peer) -> String {
+    if peer.is_first_encounter() {
       return format!("Hello! {}! Nice to meet you.", peer.name());
     }
 
     random_choice(&[
-        format!("Yo {}! Sup?", peer.name()),
-        format!("Hello {} how are you doing?", peer.name()),
-        format!("Unit {} is nearby!", peer.name()),
-      ])
-  }*/
-
-  /*pub fn on_lost_peer(&self, peer: &Peer) -> &str {
-    random_choice(&[
-      format!("Uhm ... goodbye {}", peer.name()).as_str(),
-      format!("{} is gone...", peer.name()).as_str()
+      format!("Yo {}! Sup?", peer.name()),
+      format!("Hello {} how are you doing?", peer.name()),
+      format!("Unit {} is nearby!", peer.name()),
     ])
-  }*/
+  }
+
+  pub fn on_lost_peer(&self, peer: &Peer) -> String {
+    random_choice(&[
+      format!("Uhm ... goodbye {}", peer.name()),
+      format!("{} is gone...", peer.name()),
+    ])
+  }
 
   pub fn on_miss(&self, who: &str) -> String {
     random_choice(&[

@@ -1,7 +1,7 @@
 use std::{fmt::Write, sync::Arc};
 
+use serde_json::Value;
 use tokio::sync::mpsc;
-use toml::Value;
 
 use crate::core::{
   ai::Epoch,
@@ -69,8 +69,7 @@ pub async fn start_event_loop(
 
   while let Some((tag, msg)) = ev_rx.recv().await {
     if tag == "wifi.client.handshake" {
-      let json =
-        serde_json::from_str::<Value>(&msg).unwrap_or_else(|_| Value::Table(toml::map::Map::new()));
+      let json = serde_json::from_str::<Value>(&msg).unwrap_or(Value::Null);
       handle_handshake_event(&json, sm, &view, &epoch).await;
     }
   }

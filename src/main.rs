@@ -78,7 +78,7 @@ async fn main() {
   }
 
   // Must complete before anything else
-  let identity = Identity::new().await;
+  let identity = Identity::new();
   let sm = Arc::new(SessionManager::new());
 
   let epoch = Arc::new(parking_lot::Mutex::new(Epoch::new()));

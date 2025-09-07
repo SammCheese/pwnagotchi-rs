@@ -311,13 +311,14 @@ impl Bettercap {
           }
           LOGGER.log_error("Bettercap", &format!("Request failed with status {}", resp.status()));
         }
-        Err(ureq::Error::StatusCode(400..410)) => {
+        Err(ureq::Error::StatusCode(400..410) | ureq::Error::Timeout(_)) => {
           // The server clearly got the request but didnt like it
           // Dont try this again.
-          LOGGER.log_error("Bettercap", &format!("Bad Request to Bettercap: {cmd}"));
           return Ok(());
         }
-        Err(_) => {}
+        Err(e) => {
+          LOGGER.log_warning("Bettercap", &format!("Request error: {e}"));
+        }
       }
       if retries_left == 0 {
         return Err(anyhow::anyhow!("Request failed"));

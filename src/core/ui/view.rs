@@ -1,5 +1,6 @@
 use std::{
   collections::HashMap,
+  fmt::Write,
   panic::catch_unwind,
   sync::{Arc, Mutex, PoisonError},
   time::Duration,
@@ -390,8 +391,68 @@ impl View {
       )),
     );
 
-    //self.set_closest_peer(last_session.last_peer.as_ref(), last_session.peers);
+    self.set_closest_peer(last_session.last_peer.as_ref(), last_session.peers);
     self.update(None, None);
+  }
+
+  pub fn set_closest_peer(&self, peer: Option<&Peer>, total_peers: u32) {
+    if let Some(peer) = peer {
+      let num_bars = if peer.rssi >= -67 {
+        4
+      } else if peer.rssi >= -70 {
+        3
+      } else if peer.rssi >= -80 {
+        2
+      } else {
+        1
+      };
+
+      let mut name = "▌".repeat(num_bars);
+      name += &"│".repeat(4 - num_bars);
+      let _ = write!(name, " {} {} ({})", peer.name(), peer.pwnd_run(), peer.pwnd_total());
+
+      if total_peers > 1 {
+        if total_peers > 9000 {
+          name += " of over 9000";
+        } else {
+          let _ = write!(name, " of {total_peers}");
+        }
+      }
+
+      self.set("friend_face", StateValue::Text(peer.face()));
+      self.set("friend_name", StateValue::Text(name));
+    } else {
+      self.set("friend_name", StateValue::Text(String::new()));
+      self.set("friend_face", StateValue::Text(String::new()));
+    }
+    self.update(None, None);
+  }
+
+  pub fn on_new_peer(&self, peer: &Peer) {
+    let face = if peer.is_first_encounter() {
+      *fastrand::choice(&[FaceType::Awake, FaceType::Cool]).unwrap_or(&FaceType::Awake)
+    } else if peer.is_good_friend() {
+      *fastrand::choice(&[
+        FaceType::Motivated,
+        FaceType::Friend,
+        FaceType::Happy,
+      ])
+      .unwrap_or(&FaceType::Friend)
+    } else {
+      let faces = [
+        FaceType::Excited,
+        FaceType::Smart,
+        FaceType::Happy,
+      ];
+      *fastrand::choice(&faces).unwrap_or(&FaceType::Excited)
+    };
+    self.set("face", StateValue::Face(face));
+    self.set(
+      "status",
+      StateValue::Text(self.voice.lock().unwrap_or_else(PoisonError::into_inner).on_new_peer(peer)),
+    );
+    self.update(None, None);
+    std::thread::sleep(std::time::Duration::from_secs(3));
   }
 
   pub fn on_keys_generation(&self) {
@@ -414,13 +475,15 @@ impl View {
     self.update(None, None);
   }
 
-  pub const fn on_new_peer(&self, _peer: &Peer) {
-    // TODO
-  }
-
-  pub fn on_lost_peer(&self, _peer: &Peer) {
+  pub fn on_lost_peer(&self, peer: &Peer) {
     self.set("face", StateValue::Face(FaceType::Lonely));
-    // self.set("status", StateValue::Text(self.voice.on_lost_peer(peer)));
+    self.set(
+      "status",
+      StateValue::Text(
+        self.voice.lock().unwrap_or_else(PoisonError::into_inner).on_lost_peer(peer),
+      ),
+    );
+    self.update(None, None);
   }
 
   pub fn on_free_channel(&self, channel: u8) {
