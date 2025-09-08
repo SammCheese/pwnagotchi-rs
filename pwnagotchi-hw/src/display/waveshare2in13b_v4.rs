@@ -1,4 +1,4 @@
-use image::RgbaImage;
+use tiny_skia::Pixmap as RgbaImage;
 
 use crate::display::base::{DisplayImpl, DisplayTrait, Layout};
 

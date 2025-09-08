@@ -1,4 +1,4 @@
-use std::{borrow::Cow, collections::HashMap, sync::Arc, time::SystemTime};
+use std::{collections::HashMap, sync::Arc, time::SystemTime};
 
 use parking_lot::RwLock;
 
@@ -25,7 +25,7 @@ pub struct SessionState {
   pub aps_on_channel: u32,
   pub peers: Vec<Peer>,
   pub access_points: Vec<AccessPoint>,
-  pub last_pwned: Option<Cow<'static, str>>,
+  pub last_pwned: Option<String>,
   pub history: HashMap<String, u32>,
   pub handshakes: HashMap<String, Handshake>,
 }

@@ -14,4 +14,6 @@ readme.workspace = true
 [dependencies]
 pwnagotchi-shared = { path = "../pwnagotchi-shared" }
 
-image.workspace = true
+tiny-skia.workspace = true
+png.workspace = true
+rgb.workspace = true

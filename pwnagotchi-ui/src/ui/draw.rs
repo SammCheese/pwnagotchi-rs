@@ -6,8 +6,9 @@
 )]
 
 use cosmic_text::{Attrs, Buffer, Color, Family, Metrics, Shaping, Weight};
-use image::{Rgba, RgbaImage};
 use pwnagotchi_shared::log::LOGGER;
+use rgb::Rgba;
+use tiny_skia::{BlendMode, Paint, PixmapMut as RgbaImage, Rect, Transform};
 
 use crate::ui::fonts::{FONT_CACHE, FONTS};
 
@@ -63,8 +64,6 @@ pub fn draw_text_mut(
   let mut buffer = buffer.borrow_with(&mut font_system);
   let canvas_width = canvas.width();
   let canvas_height = canvas.height();
-  let canvas_width_i32 = canvas_width as i32;
-  let canvas_height_i32 = canvas_height as i32;
   let avail_w = canvas_width.saturating_sub(pos.0) as f32;
   let avail_h = canvas_height.saturating_sub(pos.1) as f32;
 
@@ -76,7 +75,7 @@ pub fn draw_text_mut(
   buffer.set_text(content, &attrs, Shaping::Advanced);
   buffer.shape_until_scroll(true);
 
-  let base_color = Color::rgba(color[0], color[1], color[2], color[3]);
+  let base_color = Color::rgba(color.r, color.g, color.b, color.a);
   let off_x = pos.0 as i32;
   let off_y = pos.1 as i32;
 
@@ -94,31 +93,16 @@ pub fn draw_text_mut(
       max_draw_x = max_draw_x.max(x + (w as i32));
     }
 
-    for dy in 0..h {
-      for dx in 0..w {
-        let tx = x + off_x + (dx as i32);
-        let ty = y + off_y + (dy as i32);
+    let mut paint = Paint {
+      anti_alias: false,
+      blend_mode: BlendMode::SourceOver,
+      ..Default::default()
+    };
+    paint.set_color_rgba8(c.r(), c.g(), c.b(), a);
 
-        if tx < 0 || ty < 0 || tx >= canvas_width_i32 || ty >= canvas_height_i32 {
-          continue;
-        }
+    let rect = Rect::from_xywh((x + off_x) as f32, (y + off_y) as f32, w as f32, h as f32).unwrap();
 
-        let dst = canvas.get_pixel(tx as u32, ty as u32).0;
-        let src_a = u32::from(a);
-        let inv_a = 255u32 - src_a;
-
-        let blend = |s: u8, d: u8| -> u8 {
-          ((u32::from(s) * src_a + u32::from(d) * inv_a) / 255).min(255) as u8
-        };
-
-        let r = blend(c.r(), dst[0]);
-        let g = blend(c.g(), dst[1]);
-        let b = blend(c.b(), dst[2]);
-        let out_a = (src_a + (u32::from(dst[3]) * inv_a) / 255).min(255) as u8;
-
-        canvas.put_pixel(tx as u32, ty as u32, Rgba([r, g, b, out_a]));
-      }
-    }
+    canvas.fill_rect(rect, &paint, Transform::identity(), None);
   });
   drop(font_system);
 

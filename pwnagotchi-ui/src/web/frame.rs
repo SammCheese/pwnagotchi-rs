@@ -1,6 +1,6 @@
 use std::{fs, path::Path};
 
-use image::{ImageFormat, RgbaImage};
+use tiny_skia::PixmapMut as RgbaImage;
 
 pub const FRAME_FOLDER: &str = "/var/tmp/pwnagotchi";
 
@@ -10,7 +10,6 @@ pub static FRAME_PATH: std::sync::LazyLock<String> =
 pub static FRAME_LOCK: std::sync::LazyLock<tokio::sync::Mutex<()>> =
   std::sync::LazyLock::new(|| tokio::sync::Mutex::new(()));
 
-pub const FORMAT: ImageFormat = ImageFormat::Png;
 pub const CTYPE: &str = "image/png";
 
 /// Updates the frame image on disk.
@@ -18,7 +17,7 @@ pub const CTYPE: &str = "image/png";
 /// # Errors
 /// Returns an error if the image cannot be saved, the directory cannot be
 /// created, or the file cannot be renamed.
-pub fn update_frame(img: &RgbaImage) -> image::ImageResult<()> {
+pub fn update_frame(img: &RgbaImage) -> Result<(), std::io::Error> {
   let _guard = FRAME_LOCK.lock();
 
   if !Path::new(FRAME_FOLDER).exists() {
@@ -27,7 +26,7 @@ pub fn update_frame(img: &RgbaImage) -> image::ImageResult<()> {
 
   let tmp_path = format!("{}.tmp", FRAME_PATH.as_str());
 
-  img.save_with_format(&tmp_path, FORMAT)?;
+  img.as_ref().save_png(&tmp_path)?;
 
   fs::rename(&tmp_path, FRAME_PATH.as_str())?;
 

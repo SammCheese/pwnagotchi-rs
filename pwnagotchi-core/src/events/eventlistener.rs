@@ -1,14 +1,20 @@
 use std::{fmt::Write, sync::Arc};
 
 use pwnagotchi_shared::{
-  config::config, log::LOGGER, models::net::Handshake, sessions::manager::SessionManager,
-  traits::ui::ViewTrait, types::ui::StateValue, utils::general::total_unique_handshakes,
+  config::config,
+  log::LOGGER,
+  models::net::Handshake,
+  sessions::manager::SessionManager,
+  traits::ui::ViewTrait,
+  types::ui::StateValue,
+  utils::general::{STAP, hostname_or_mac, total_unique_handshakes},
 };
 use serde_json::Value;
 use tokio::sync::mpsc;
 
 use crate::{
-  ai::Epoch, bettercap::BettercapCommand, traits::bettercapcontroller::BettercapController,
+  agent::find_ap_sta_in_session, ai::Epoch, bettercap::BettercapCommand,
+  traits::bettercapcontroller::BettercapController,
 };
 
 pub async fn start_event_loop(
@@ -94,26 +100,41 @@ async fn handle_handshake_event(
     .and_then(|v| v.as_str())
     .unwrap_or("")
     .to_string();
-  let key = format!("{ap_mac} -> {sta_mac}");
+  let key = format!("{sta_mac} -> {ap_mac} ");
 
-  let mut state = session.state.write(); // hold write lock once
+  let mut state = session.state.write();
 
-  let entry = state.handshakes.entry(key);
+  let entry = state.handshakes.entry(key.clone());
   let text = match entry {
     std::collections::hash_map::Entry::Occupied(_) => {
       LOGGER.log_debug("Agent", &format!("Handshake already exists for {ap_mac} -> {sta_mac}"));
       return;
     }
     std::collections::hash_map::Entry::Vacant(entry) => {
-      LOGGER
-        .log_warning("Agent", &format!("!!! captured new handshake: {ap_mac} -> {sta_mac} !!!"));
       entry.insert(Handshake {
-        mac: ap_mac,
+        mac: ap_mac.clone(),
         filename,
         timestamp: std::time::SystemTime::now(),
       });
 
-      state.last_pwned = Some(sta_mac.into());
+      let last_pwned = find_ap_sta_in_session(&session, &sta_mac, &ap_mac);
+
+      if let Some((ap, sta)) = last_pwned {
+        let ap_stap = STAP::AccessPoint(&ap.clone());
+        let hostname = hostname_or_mac(&ap_stap);
+        LOGGER.log_info(
+          "Agent",
+          &format!(
+            "!!! captured new handshake on channel {}, {} dBm: {} ({}) -> {} [{} ({})] !!!",
+            ap.channel, ap.rssi, sta.mac, sta.vendor, ap.hostname, ap.mac, ap.vendor
+          ),
+        );
+        state.last_pwned = Some(hostname.to_string());
+      } else {
+        LOGGER.log_info("Agent", &format!("!!! captured new handshake: {key} !!!"));
+        state.last_pwned = Some(ap_mac.clone());
+      }
+
       let total = total_unique_handshakes(&config().bettercap.handshakes);
       let handshake_count = state.handshakes.len();
 

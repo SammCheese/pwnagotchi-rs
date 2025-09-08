@@ -6,7 +6,6 @@ use std::{
   time::Duration,
 };
 
-use image::{Rgba, RgbaImage};
 use pwnagotchi_hw::display::base::DisplayTrait;
 use pwnagotchi_shared::{
   config::config,
@@ -22,6 +21,8 @@ use pwnagotchi_shared::{
   types::ui::{FaceType, StateValue},
   utils::{faces::face_to_string, general::total_unique_handshakes},
 };
+use rgb::Rgba;
+use tiny_skia::PixmapMut as RgbaImage;
 
 use crate::{
   ui::{
@@ -32,8 +33,8 @@ use crate::{
   web::frame,
 };
 
-const WHITE: Rgba<u8> = Rgba([255, 255, 255, 255]);
-const BLACK: Rgba<u8> = Rgba([0, 0, 0, 255]);
+const WHITE: Rgba<u8> = Rgba { r: 255, g: 255, b: 255, a: 255 };
+const BLACK: Rgba<u8> = Rgba { r: 0, g: 0, b: 0, a: 255 };
 
 pub struct View {
   pub voice: Arc<dyn VoiceTrait + Send + Sync>,
@@ -407,7 +408,19 @@ impl ViewTrait for View {
       .map_or_else(|_| Vec::new(), |state_guard| state_guard.changes(&self.ignore_changes));
 
     if force || !changes.is_empty() {
-      let mut canvas = RgbaImage::from_pixel(self.width, self.height, self.background_color);
+      let pixel_count = (self.width * self.height) as usize;
+      let mut buffer = vec![
+        self.background_color.r,
+        self.background_color.g,
+        self.background_color.b,
+        self.background_color.a,
+      ]
+      .into_iter()
+      .cycle()
+      .take(pixel_count * 4)
+      .collect::<Vec<u8>>();
+      let mut canvas = RgbaImage::from_bytes(&mut buffer, self.width, self.height)
+        .expect("Failed to create canvas from buffer");
 
       if let Ok(state_guard) = self.state.lock() {
         for widget in state_guard.items().values() {
@@ -521,7 +534,7 @@ impl View {
       "CH".to_string(),
       TextStyle {
         font: fontname.to_string(),
-        color: image::Rgba(color.0),
+        color,
         size: 10.0,
         weight: cosmic_text::Weight::EXTRA_BOLD,
         max_length: None,
@@ -530,7 +543,7 @@ impl View {
       "-".to_string(),
       TextStyle {
         font: fontname.to_string(),
-        color: image::Rgba(color.0),
+        color,
         size: 10.0,
         weight: cosmic_text::Weight::NORMAL,
         max_length: None,
@@ -545,7 +558,7 @@ impl View {
       "APS".to_string(),
       TextStyle {
         font: fontname.to_string(),
-        color: image::Rgba(color.0),
+        color,
         size: 10.0,
         weight: cosmic_text::Weight::EXTRA_BOLD,
         max_length: None,
@@ -554,7 +567,7 @@ impl View {
       "0".to_string(),
       TextStyle {
         font: fontname.to_string(),
-        color: image::Rgba(color.0),
+        color,
         size: 10.0,
         weight: cosmic_text::Weight::NORMAL,
         max_length: None,
@@ -569,7 +582,7 @@ impl View {
       "UP".to_string(),
       TextStyle {
         font: fontname.to_string(),
-        color: image::Rgba(color.0),
+        color,
         size: 10.0,
         weight: cosmic_text::Weight::EXTRA_BOLD,
         max_length: None,
@@ -578,7 +591,7 @@ impl View {
       "00:00:00".to_string(),
       TextStyle {
         font: fontname.to_string(),
-        color: image::Rgba(color.0),
+        color,
         size: 10.0,
         weight: cosmic_text::Weight::NORMAL,
         max_length: None,
@@ -588,7 +601,7 @@ impl View {
   }
 
   const fn make_line_widget(pos: ((f32, f32), (f32, f32)), color: Rgba<u8>) -> Line {
-    Line::new(pos, image::Rgba(color.0), 2)
+    Line::new(pos, color, 2)
   }
 
   fn make_face_widget(pos: (u32, u32), fontname: &str, color: Rgba<u8>) -> TextWidget {
@@ -597,7 +610,7 @@ impl View {
       face_to_string(&FaceType::Awake),
       TextStyle {
         font: fontname.to_string(),
-        color: image::Rgba(color.0),
+        color,
         size: 40.0,
         weight: cosmic_text::Weight::NORMAL,
         max_length: None,
@@ -612,7 +625,7 @@ impl View {
       "",
       TextStyle {
         font: fontname.to_string(),
-        color: image::Rgba(color.0),
+        color,
         size: 10.0,
         weight: cosmic_text::Weight::NORMAL,
         max_length: None,
@@ -627,7 +640,7 @@ impl View {
       format!("{}>", config().main.name),
       TextStyle {
         font: fontname.to_string(),
-        color: image::Rgba(color.0),
+        color,
         size: 10.0,
         weight: cosmic_text::Weight::NORMAL,
         max_length: None,
@@ -647,7 +660,7 @@ impl View {
       voice.default_line(),
       TextStyle {
         font: fontname.to_string(),
-        color: image::Rgba(color.0),
+        color,
         size: 10.0,
         weight: cosmic_text::Weight::NORMAL,
         max_length: Some(40),
@@ -662,7 +675,7 @@ impl View {
       "PWND".to_string(),
       TextStyle {
         font: fontname.to_string(),
-        color: image::Rgba(color.0),
+        color,
         size: 10.0,
         weight: cosmic_text::Weight::EXTRA_BOLD,
         max_length: None,
@@ -671,7 +684,7 @@ impl View {
       "0 (00)".to_string(),
       TextStyle {
         font: fontname.to_string(),
-        color: image::Rgba(color.0),
+        color,
         size: 10.0,
         weight: cosmic_text::Weight::NORMAL,
         max_length: None,
@@ -686,7 +699,7 @@ impl View {
       "AUTO",
       TextStyle {
         font: fontname.to_string(),
-        color: image::Rgba(color.0),
+        color,
         size: 10.0,
         weight: cosmic_text::Weight::EXTRA_BOLD,
         max_length: None,

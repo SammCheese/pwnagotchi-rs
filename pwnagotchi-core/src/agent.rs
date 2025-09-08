@@ -435,6 +435,21 @@ fn should_interact(session: &Arc<Session>, bssid: &str) -> bool {
   session.state.read().history[&bssid.to_string()] < config().personality.max_interactions
 }
 
+pub fn find_ap_sta_in_session(
+  session: &Arc<Session>,
+  sta_mac: &str,
+  ap_mac: &str,
+) -> Option<(AccessPoint, Station)> {
+  let session = session.state.read();
+
+  session.access_points.iter().find(|ap| ap.mac == ap_mac).and_then(|ap| {
+    ap.clients
+      .iter()
+      .find(|sta| sta.mac == sta_mac)
+      .map(|sta| (ap.clone(), sta.clone()))
+  })
+}
+
 pub fn find_ap_sta_in<'a>(
   sta_mac: &str,
   ap_mac: &str,

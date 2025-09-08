@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
-use image::RgbaImage;
 use pwnagotchi_shared::config::config;
+use tiny_skia::Pixmap as RgbaImage;
 
 use crate::display::waveshare2in13b_v4::Waveshare2in13bV4;
 

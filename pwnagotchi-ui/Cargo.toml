@@ -17,11 +17,13 @@ pwnagotchi-hw = { path = "../pwnagotchi-hw" }
 pwnagotchi-shared = { path = "../pwnagotchi-shared" }
 
 async-trait.workspace = true
-image.workspace = true
 tokio.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 fastrand.workspace = true
+tiny-skia.workspace = true
+png.workspace = true
+rgb.workspace = true
 
 include_dir = "0.7.4"
 axum = "0.8.4"
@@ -29,6 +31,5 @@ tower = "0.5.2"
 askama = "0.14.0"
 
 
-imageproc = "0.25.0"
 cosmic-text = "0.14.2"
 mime_guess = "2.0.5"

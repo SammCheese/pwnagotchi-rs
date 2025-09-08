@@ -3,7 +3,7 @@ use std::{
   sync::{Arc, Mutex},
 };
 
-use image::RgbaImage;
+use tiny_skia::PixmapMut as RgbaImage;
 
 use crate::{
   mesh::peer::Peer,

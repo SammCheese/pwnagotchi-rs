@@ -1,11 +1,6 @@
-use std::path::Path;
-
-use image::{DynamicImage, Rgba, RgbaImage};
-use imageproc::{
-  drawing::{draw_filled_rect_mut, draw_hollow_rect_mut, draw_line_segment_mut},
-  rect::Rect,
-};
 use pwnagotchi_shared::{traits::ui::Widget, types::ui::StateValue};
+use rgb::Rgba;
+use tiny_skia::{Color as SkiaColor, Paint, PathBuilder, PixmapMut as RgbaImage, Rect, Stroke};
 
 use crate::ui::draw::draw_text_mut;
 
@@ -23,51 +18,12 @@ impl Default for TextStyle {
   fn default() -> Self {
     Self {
       font: "DejaVu Sans Mono".to_string(),
-      color: Rgba([0, 0, 0, 255]),
+      color: Rgba { r: 255, g: 255, b: 255, a: 255 },
       size: 14.0,
       weight: cosmic_text::Weight::NORMAL,
       max_length: None,
       wrap: false,
     }
-  }
-}
-
-pub struct Bitmap {
-  xy: (u32, u32),
-  color: u8,
-  image: DynamicImage,
-}
-
-impl Bitmap {
-  /// Creates a new `Bitmap` from the given path, position, and color.
-  ///
-  /// # Errors
-  ///
-  /// Returns an error if the image cannot be opened from the provided path.
-  pub fn new<P: AsRef<Path>>(
-    path: P,
-    xy: (u32, u32),
-    color: u8,
-  ) -> Result<Self, image::ImageError> {
-    let image = image::open(path)?;
-    Ok(Self { xy, color, image })
-  }
-}
-
-impl Widget for Bitmap {
-  fn draw(&self, canvas: &mut RgbaImage) {
-    let mut img = self.image.clone();
-    if self.color == 0xff {
-      img.invert();
-    }
-
-    let img_rgba = img.to_rgba8();
-
-    image::imageops::overlay(canvas, &img_rgba, self.xy.0.into(), self.xy.1.into());
-  }
-  fn set_value(&mut self, _value: StateValue) {}
-  fn get_value(&self) -> StateValue {
-    StateValue::None
   }
 }
 
@@ -87,7 +43,24 @@ impl Line {
 
 impl Widget for Line {
   fn draw(&self, canvas: &mut RgbaImage) {
-    draw_line_segment_mut(canvas, self.xy.0, self.xy.1, self.color);
+    let mut pb = PathBuilder::new();
+    pb.move_to(self.xy.0.0, self.xy.0.1);
+    pb.line_to(self.xy.1.0, self.xy.1.1);
+    if let Some(path) = pb.finish() {
+      let mut paint = Paint::default();
+      paint.set_color(SkiaColor::from_rgba8(
+        self.color.r,
+        self.color.g,
+        self.color.b,
+        self.color.a,
+      ));
+      let stroke = Stroke {
+        #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
+        width: self.width as f32,
+        ..Stroke::default()
+      };
+      canvas.stroke_path(&path, &paint, &stroke, tiny_skia::Transform::identity(), None);
+    }
   }
   fn set_value(&mut self, _value: StateValue) {}
   fn get_value(&self) -> StateValue {
@@ -109,7 +82,23 @@ impl RectWidget {
 
 impl Widget for RectWidget {
   fn draw(&self, canvas: &mut RgbaImage) {
-    draw_hollow_rect_mut(canvas, self.rect, self.color);
+    let mut pb = PathBuilder::new();
+    let x = self.rect.left();
+    let y = self.rect.top();
+    let w = self.rect.width();
+    let h = self.rect.height();
+
+    pb.move_to(x, y);
+    pb.line_to(x + w, y);
+    pb.line_to(x + w, y + h);
+    pb.line_to(x, y + h);
+    pb.close();
+
+    let path = pb.finish().unwrap();
+    let mut paint = Paint::default();
+    paint.set_color(SkiaColor::from_rgba8(self.color.r, self.color.g, self.color.b, self.color.a));
+    let stroke = Stroke { width: 1.0, ..Stroke::default() };
+    canvas.stroke_path(&path, &paint, &stroke, tiny_skia::Transform::identity(), None);
   }
   fn set_value(&mut self, _value: StateValue) {}
   fn get_value(&self) -> StateValue {
@@ -131,7 +120,34 @@ impl FilledRect {
 
 impl Widget for FilledRect {
   fn draw(&self, canvas: &mut RgbaImage) {
-    draw_filled_rect_mut(canvas, self.rect, self.color);
+    let mut pb = PathBuilder::new();
+    let x = self.rect.left();
+    let y = self.rect.top();
+    let w = self.rect.width();
+    let h = self.rect.height();
+
+    pb.move_to(x, y);
+    pb.line_to(x + w, y);
+    pb.line_to(x + w, y + h);
+    pb.line_to(x, y + h);
+    pb.close();
+
+    if let Some(path) = pb.finish() {
+      let mut paint = Paint::default();
+      paint.set_color(SkiaColor::from_rgba8(
+        self.color.r,
+        self.color.g,
+        self.color.b,
+        self.color.a,
+      ));
+      canvas.fill_path(
+        &path,
+        &paint,
+        tiny_skia::FillRule::Winding,
+        tiny_skia::Transform::identity(),
+        None,
+      );
+    }
   }
   fn set_value(&mut self, _value: StateValue) {}
   fn get_value(&self) -> StateValue {
