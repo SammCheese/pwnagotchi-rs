@@ -1,0 +1,164 @@
+#![allow(clippy::cast_possible_truncation)]
+
+use std::{collections::HashMap, sync::Arc};
+
+use parking_lot::Mutex;
+use pwnagotchi_shared::{
+  config::config, log::LOGGER, mesh::peer::Peer, models::grid::Advertisement,
+  sessions::manager::SessionManager, traits::ui::ViewTrait, types::ui::StateValue,
+  utils::general::total_unique_handshakes,
+};
+
+use crate::{
+  ai::Epoch,
+  grid::{advertise, peers, set_advertisement_data},
+  identity::Identity,
+};
+
+pub struct AsyncAdvertiser {
+  pub epoch: Arc<Mutex<Epoch>>,
+  pub advertisement: Advertisement,
+  pub view: Option<Arc<dyn ViewTrait>>,
+  pub peers: HashMap<String, Peer>,
+  pub closest_peer: Option<String>,
+}
+
+impl AsyncAdvertiser {
+  pub fn new(
+    epoch: Arc<Mutex<Epoch>>,
+    identity: &Identity,
+    view: Option<Arc<dyn ViewTrait>>,
+  ) -> Self {
+    let advertisement = Advertisement {
+      name: config().main.name.to_string(),
+      version: env!("CARGO_PKG_VERSION").to_string(),
+      identity: identity.fingerprint().to_string(),
+      face: config().faces.friend.to_string(),
+      pwnd_run: 0,
+      pwnd_total: 0,
+      uptime: 0,
+      epoch: 0,
+      policy: config().personality.clone(),
+    };
+
+    Self {
+      epoch,
+      view,
+      advertisement,
+      peers: HashMap::new(),
+      closest_peer: None,
+    }
+  }
+
+  pub fn fingerprint(&self) -> &str {
+    &self.advertisement.identity
+  }
+
+  #[allow(dead_code)]
+  async fn update_advertisement(&mut self, sm: &Arc<SessionManager>) {
+    self.advertisement.pwnd_run = sm.get_session().await.state.read().handshakes.len() as u32;
+    self.advertisement.pwnd_total = total_unique_handshakes(&config().bettercap.handshakes) as u32;
+    self.advertisement.uptime = 0;
+    self.advertisement.epoch = self.epoch.lock().epoch as u32;
+    set_advertisement_data(serde_json::to_value(self.advertisement.clone()).unwrap()).await;
+  }
+
+  fn on_face_change(&mut self, _old: StateValue, new: StateValue) {
+    let StateValue::Text(new) = new else {
+      return;
+    };
+
+    if let Some(face_str) = Some(new) {
+      self.advertisement.face = face_str;
+    }
+
+    tokio::task::spawn({
+      let advertisement = self.advertisement.clone();
+      async move {
+        set_advertisement_data(serde_json::to_value(advertisement).unwrap_or_default()).await;
+      }
+    });
+  }
+
+  pub fn cumulative_encounters(&self) -> u32 {
+    self.peers.values().map(|p| p.encounters).sum()
+  }
+
+  fn on_new_peer(&self, peer: &Peer) {
+    if let Some(view) = &self.view {
+      view.on_new_peer(peer);
+    }
+  }
+
+  fn on_lost_peer(&self, peer: &Peer) {
+    if let Some(view) = &self.view {
+      view.on_lost_peer(peer);
+    }
+  }
+
+  pub async fn advertisement_poller(&mut self) {
+    tokio::time::sleep(std::time::Duration::from_secs(20)).await;
+    loop {
+      LOGGER.log_debug("GRID", "Polling pwngrid-peer for peers...");
+
+      let peers_opt = peers().await;
+      let mut new_peers = HashMap::new();
+      self.closest_peer = None;
+
+      if let Some(peers_vec) = peers_opt {
+        for p in &peers_vec {
+          let peer = Peer::new(p);
+          new_peers.insert(p.fingerprint.clone().unwrap_or_default(), peer.clone());
+          let is_closer = if let Some(ref closest) = self.closest_peer {
+            peer.rssi > self.peers.get(closest).map_or(-100, |p| p.rssi)
+          } else {
+            true
+          };
+          if is_closer {
+            self.closest_peer = Some(p.fingerprint.clone().unwrap_or_default());
+          }
+        }
+      }
+
+      let to_delete = self
+        .peers
+        .keys()
+        .filter(|k| !new_peers.contains_key(*k))
+        .cloned()
+        .collect::<Vec<_>>();
+
+      for k in to_delete {
+        if let Some(p) = self.peers.remove(&k) {
+          self.on_lost_peer(&p);
+        }
+      }
+
+      for (k, v) in &new_peers {
+        if !self.peers.contains_key(k) {
+          self.on_new_peer(v);
+        } else if let Some(existing_peer) = self.peers.get_mut(k) {
+          existing_peer.update(v);
+        }
+      }
+
+      tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+    }
+  }
+}
+
+pub async fn start_advertising(
+  advertiser: &Arc<Mutex<AsyncAdvertiser>>,
+  _sm: &Arc<SessionManager>,
+  view: &Arc<dyn ViewTrait + Send + Sync>,
+) {
+  if config().personality.advertise {
+    let value = advertiser.lock().advertisement.clone();
+    set_advertisement_data(serde_json::to_value(value).unwrap_or_default()).await;
+    advertise(Some(true)).await;
+    let advertiser_clone = Arc::clone(advertiser);
+    view.on_state_change(
+      "face",
+      Box::new(move |old, new| advertiser_clone.lock().on_face_change(old, new)),
+    );
+  }
+}

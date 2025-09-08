@@ -1,57 +1,45 @@
-[package]
-name = "pwnagotchi-rs"
+[workspace.package]
 version = "1.0.0"
 edition = "2024"
 license = "MIT"
-description = "A Rust implementation of Pwnagotchi functionalities"
 readme = "README.md"
 repository = "https://github.com/SammCheese/pwnagotchi-rs"
 authors = ["Sammy <sammy@sammcheese.net>"]
 keywords = ["pwnagotchi", "auditing", "security", "networking", "AI"]
 categories = ["Networking", "Security", "AI"]
 
+
 [profile.release]
 debug = true
 
-[dependencies]
+[workspace]
+resolver = "2"
+members = ["pwnagotchi-core", "pwnagotchi-ui", "pwnagotchi-hw", "pwnagotchi-rs", "pwnagotchi-shared"]
+
+[workspace.dependencies]
 tokio = { version = "1.47.1", features = ["time", "rt-multi-thread", "process"] }
 tokio-stream = { version = "0.1.17", features = ["io-util"] }
 futures-util = { version = "0.3.31", default-features = false, features = ["sink"] }
 serde = { version = "1.0.219", features = ["derive"] }
 tokio-tungstenite = "0.27.0"
-
 serde_json = "1.0.143"
+image = "0.25.8"
+ureq = { version = "3.1.1", features = ["json"] }
+fastrand = "2.3.0"
+
 toml = "0.9.5"
+async-trait = "0.1.89"
 
 anyhow = "1.0.99"
 once_cell = "1.21.3"
 parking_lot = "0.12.4"
 
-regex = "1.11.2"
-
-clap = { version = "4.5.47", features = ["derive"] }
-clap_complete = "4.5.57"
-nix = "0.30.1"
-sysinfo = "0.37.0"
-
-async-trait = "0.1.89"
-fastrand = "2.3.0"
-sha2 = "0.10.9"
-rsa = "0.9.8"
-base64 = "0.22.1"
 hex = "0.4.3"
 md5 = "0.8.0"
+regex = "1.11.2"
 
-include_dir = "0.7.4"
-axum = "0.8.4"
-tower = "0.5.2"
+sysinfo = "0.37.0"
 
-image = "0.25.8"
-imageproc = "0.25.0"
-cosmic-text = "0.14.2"
-mime_guess = "2.0.5"
 time = {version = "0.3.43", features = ["formatting", "parsing", "macros", "serde"]}
-askama = "0.14.0"
-ureq = { version = "3.1.1", features = ["json"]}
 
 

@@ -1,0 +1,17 @@
+[package]
+name = "pwnagotchi-hw"
+description = "The Display and Hardware of Pwnagotchi-rs"
+
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+keywords.workspace = true
+categories.workspace = true
+readme.workspace = true
+
+[dependencies]
+pwnagotchi-shared = { path = "../pwnagotchi-shared" }
+
+image.workspace = true

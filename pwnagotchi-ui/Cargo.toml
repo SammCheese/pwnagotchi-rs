@@ -1,0 +1,34 @@
+[package]
+name = "pwnagotchi-ui"
+description = "The UI and Webserver of Pwnagotchi-rs"
+
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+keywords.workspace = true
+categories.workspace = true
+readme.workspace = true
+
+
+[dependencies]
+pwnagotchi-hw = { path = "../pwnagotchi-hw" }
+pwnagotchi-shared = { path = "../pwnagotchi-shared" }
+
+async-trait.workspace = true
+image.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+fastrand.workspace = true
+
+include_dir = "0.7.4"
+axum = "0.8.4"
+tower = "0.5.2"
+askama = "0.14.0"
+
+
+imageproc = "0.25.0"
+cosmic-text = "0.14.2"
+mime_guess = "2.0.5"

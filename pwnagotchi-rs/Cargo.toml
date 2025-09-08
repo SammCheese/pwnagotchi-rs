@@ -1,0 +1,26 @@
+[package]
+name = "pwnagotchi-rs"
+description = "A Rewrite of Pwnagotchi in Rust"
+
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+keywords.workspace = true
+categories.workspace = true
+readme.workspace = true
+
+[dependencies]
+pwnagotchi-core = { path = "../pwnagotchi-core"}
+pwnagotchi-ui = { path = "../pwnagotchi-ui"}
+pwnagotchi-hw = { path = "../pwnagotchi-hw"}
+pwnagotchi-shared = { path = "../pwnagotchi-shared" }
+
+tokio.workspace = true
+parking_lot.workspace = true
+
+clap = { version = "4.5.47", features = ["derive"] }
+clap_complete = "4.5.57"
+
+nix = "0.30.1"
