@@ -20,6 +20,8 @@ pub mod sessions {
   pub mod manager;
   pub mod recovery;
   pub mod session;
+  pub mod session_parser;
+  pub mod session_stats;
 }
 
 pub mod mesh {

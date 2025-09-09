@@ -33,27 +33,19 @@ pub fn format_duration_human(duration: Duration) -> String {
   format!("{:02}:{:02}:{:02}", hours, minutes % 60, seconds % 60)
 }
 
-pub enum STAP<'a> {
-  Station(&'a Station),
-  AccessPoint(&'a AccessPoint),
+pub fn hostname_or_mac(ap: &AccessPoint) -> &str {
+  if ap.hostname.trim().is_empty() || ap.hostname.contains("<hidden>") {
+    &ap.mac
+  } else {
+    &ap.hostname
+  }
 }
 
-pub fn hostname_or_mac<'a>(station: &'a STAP<'a>) -> &'a str {
-  match station {
-    STAP::Station(sta) => {
-      if sta.hostname.trim().is_empty() || sta.hostname.contains("<hidden>") {
-        &sta.mac
-      } else {
-        &sta.hostname
-      }
-    }
-    STAP::AccessPoint(ap) => {
-      if ap.hostname.trim().is_empty() || ap.hostname.contains("<hidden>") {
-        &ap.mac
-      } else {
-        &ap.hostname
-      }
-    }
+pub fn sta_hostname_or_mac(sta: &Station) -> &str {
+  if sta.hostname.trim().is_empty() || sta.hostname.contains("<hidden>") {
+    &sta.mac
+  } else {
+    &sta.hostname
   }
 }
 

@@ -19,7 +19,10 @@ use pwnagotchi_shared::{
     voice::VoiceTrait,
   },
   types::ui::{FaceType, StateValue},
-  utils::{faces::face_to_string, general::total_unique_handshakes},
+  utils::{
+    faces::face_to_string,
+    general::{format_duration_human, total_unique_handshakes},
+  },
 };
 use rgb::Rgba;
 use tiny_skia::PixmapMut as RgbaImage;
@@ -119,10 +122,15 @@ impl ViewTrait for View {
   }
 
   fn on_manual_mode(&self, last_session: &LastSession) {
+    let Some(session) = last_session.stats.as_ref() else {
+      eprintln!("Warning: last_session.stats is None");
+      return;
+    };
+
     self.set("mode", StateValue::Text("MANU".into()));
     self.set(
       "face",
-      StateValue::Face(if last_session.epochs > 3 && last_session.handshakes == 0 {
+      StateValue::Face(if session.epochs.epochs > 3 && session.handshakes == 0 {
         FaceType::Sad
       } else {
         FaceType::Happy
@@ -130,20 +138,22 @@ impl ViewTrait for View {
     );
 
     self.set("status", StateValue::Text(self.voice.on_last_session_data(last_session)));
-    self.set("epoch", StateValue::Text(last_session.epochs.to_string()));
-    self.set("uptime", StateValue::Text(last_session.duration.clone()));
+    self.set("epoch", StateValue::Text(session.epochs.epochs.to_string()));
+    let duration = Duration::from_secs(session.duration_secs.unwrap_or(0));
+    self.set("uptime", StateValue::Text(format_duration_human(duration)));
     self.set("channel", StateValue::Text("-".into()));
-    self.set("aps", StateValue::Text(last_session.associated.to_string()));
+    self.set("aps", StateValue::Text(session.associated.to_string()));
     self.set(
       "shakes",
       StateValue::Text(format!(
         "{} ({:02})",
-        last_session.handshakes,
+        session.handshakes,
         total_unique_handshakes(&config().bettercap.handshakes)
       )),
     );
 
-    self.set_closest_peer(last_session.last_peer.as_ref(), last_session.peers);
+    #[allow(clippy::cast_possible_truncation)]
+    self.set_closest_peer(session.peers.last_peer.as_ref(), session.peers.peers as u32);
     self.update(None, None);
   }
 

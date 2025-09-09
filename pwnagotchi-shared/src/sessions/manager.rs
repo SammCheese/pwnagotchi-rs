@@ -2,7 +2,10 @@ use std::sync::Arc;
 
 use tokio::sync::{RwLock, broadcast};
 
-use crate::sessions::{lastsession::LastSession, session::Session};
+use crate::{
+  sessions::{lastsession::LastSession, session::Session},
+  traits::ui::ViewTrait,
+};
 
 pub struct SessionManager {
   current: Arc<RwLock<Arc<Session>>>,
@@ -10,19 +13,13 @@ pub struct SessionManager {
   notifier: broadcast::Sender<()>,
 }
 
-impl Default for SessionManager {
-  fn default() -> Self {
-    Self::new()
-  }
-}
-
 impl SessionManager {
-  pub fn new() -> Self {
+  pub fn new(view: &Arc<dyn ViewTrait + Send + Sync>) -> Self {
     let (tx, _rx) = broadcast::channel(16);
     Self {
       // What the fuck
       current: Arc::new(RwLock::new(Arc::new(Session::new()))),
-      last: Arc::new(RwLock::new(Some(Arc::new(LastSession::new())))),
+      last: Arc::new(RwLock::new(Some(Arc::new(LastSession::new(view))))),
       notifier: tx,
     }
   }

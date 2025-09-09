@@ -3,7 +3,7 @@ const API_ADDRESS: &str = "http://127.0.0.1:8666/api/v1";
 use std::sync::LazyLock;
 
 use pwnagotchi_shared::{
-  log::LOGGER, models::grid::PeerResponse, sessions::lastsession::LastSession,
+  config::config, log::LOGGER, models::grid::PeerResponse, sessions::lastsession::LastSession,
 };
 use ureq::{Agent, config::Config};
 
@@ -97,25 +97,29 @@ pub async fn closest_peer() -> Option<PeerResponse> {
 }
 
 pub fn update_data(last_session: &LastSession) {
+  let Some(session) = last_session.stats.as_ref() else {
+    eprintln!("Warning: last_session.stats is None");
+    return;
+  };
   let data = serde_json::json!({
     "ai": "No AI!",
     "session": {
-      "duration": last_session.duration,
-      "epochs": last_session.epochs,
-      "train_epochs": last_session.train_epochs,
-      "avg_reward": last_session.avg_reward,
-      "min_reward": last_session.min_reward,
-      "max_reward": last_session.max_reward,
-      "deauthed": last_session.deauthed,
-      "associated": last_session.associated,
-      "handshakes": last_session.handshakes,
-      "peers": last_session.peers,
+      "duration": session.duration_secs,
+      "epochs": session.epochs,
+      "train_epochs": session.epochs.train_epochs,
+      "avg_reward": session.epochs.avg_reward,
+      "min_reward": session.epochs.min_reward,
+      "max_reward": session.epochs.max_reward,
+      "deauthed": session.deauthed,
+      "associated": session.associated,
+      "handshakes": session.handshakes,
+      "peers": session.peers,
     },
     "uname": "linux",
     "version": env!("CARGO_PKG_VERSION"),
     "build": "Pwnagotchi-rs by Sammy!",
     "plugins": [],
-    "language": "en",
+    "language": config().main.lang,
     "bettercap": "1.0.0",
     "opwngrid": "1.1.0",
   });

@@ -147,7 +147,7 @@ impl AgentObserver for Automata {
     let (_epoch_num, did_miss, sad_for, bored_for, active_for, blind_for, was_stale) = {
       let mut epoch = self.epoch.lock();
 
-      LOGGER.log_debug(
+      LOGGER.log_info(
         "Epoch",
         &format!("Advancing to next epoch {} -> {}", epoch.epoch, epoch.epoch + 1),
       );

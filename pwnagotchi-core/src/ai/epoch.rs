@@ -270,7 +270,7 @@ impl Epoch {
       reward: RewardFunction::call(self.epoch + 1, &self.epoch_data),
     };
 
-    LOGGER.log_info("Epoch", format!(
+    LOGGER.log_info(format!("Epoch {}", self.epoch).as_str(), format!(
       "duration={} slept_for={} blind={} sad={} bored={} inactive={} active={} peers={} tot_bond={} avg_bond={} hops={} missed={} deauths={} assocs={} handshakes={} cpu={} mem={} temperature={} reward={}",
       self.epoch_data.duration_secs,
       self.epoch_data.slept_for_secs,

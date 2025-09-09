@@ -5,7 +5,7 @@ use pwnagotchi_shared::{
   models::net::{AccessPoint, Station},
   sessions::lastsession::LastSession,
   traits::voice::VoiceTrait,
-  utils::general::{STAP, hostname_or_mac, random_choice},
+  utils::general::{hostname_or_mac, random_choice, sta_hostname_or_mac},
 };
 
 #[derive(Debug, Clone)]
@@ -194,8 +194,7 @@ impl VoiceTrait for Voice {
   }
 
   fn on_assoc(&self, ap: &AccessPoint) -> String {
-    let binding = STAP::AccessPoint(ap);
-    let what = hostname_or_mac(&binding);
+    let what = hostname_or_mac(ap);
 
     random_choice(&[
       format!("Hey {what} let's be friends!"),
@@ -206,8 +205,7 @@ impl VoiceTrait for Voice {
   }
 
   fn on_deauth(&self, sta: &Station) -> String {
-    let binding = STAP::Station(sta);
-    let who = hostname_or_mac(&binding);
+    let who = sta_hostname_or_mac(sta);
 
     random_choice(&[
       format!("Just decided that {who} needs no Wi-Fi!"),
@@ -247,20 +245,24 @@ impl VoiceTrait for Voice {
   }
 
   fn on_last_session_data(&self, last_session: &LastSession) -> String {
-    let mut status = format!("kicked {} stations\n", last_session.deauthed);
+    let Some(session) = last_session.stats.as_ref() else {
+      eprintln!("Warning: last_session.stats is None");
+      return "No previous session data available.".to_string();
+    };
+    let mut status = format!("kicked {} stations\n", session.deauthed);
 
-    if last_session.associated > 999 {
+    if session.associated > 999 {
       let _ = writeln!(status, " Made > 999 new friends");
     } else {
-      let _ = writeln!(status, " Made {} new friends", last_session.associated);
+      let _ = writeln!(status, " Made {} new friends", session.associated);
     }
 
-    let _ = writeln!(status, "Got {} handshakes", last_session.handshakes);
+    let _ = writeln!(status, "Got {} handshakes", session.handshakes);
 
-    if last_session.peers == 1 {
+    if session.peers.peers == 1 {
       let _ = writeln!(status, " Met 1 peer");
-    } else if last_session.peers > 0 {
-      let _ = writeln!(status, " Met {} peers", last_session.peers);
+    } else if session.peers.peers > 0 {
+      let _ = writeln!(status, " Met {} peers", session.peers.peers);
     }
 
     status

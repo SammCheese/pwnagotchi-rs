@@ -7,7 +7,7 @@ use pwnagotchi_shared::{
   sessions::manager::SessionManager,
   traits::ui::ViewTrait,
   types::ui::StateValue,
-  utils::general::{STAP, hostname_or_mac, total_unique_handshakes},
+  utils::general::{hostname_or_mac, total_unique_handshakes},
 };
 use serde_json::Value;
 use tokio::sync::mpsc;
@@ -77,13 +77,12 @@ pub async fn start_event_loop(
   }
 }
 
-async fn handle_handshake_event(
+pub async fn handle_handshake_event(
   jmsg: &Value,
   sm: &Arc<SessionManager>,
   view: &Arc<dyn ViewTrait + Send + Sync>,
   epoch: &Arc<parking_lot::Mutex<Epoch>>,
 ) {
-  let session = sm.get_session().await;
   let data = jmsg.get("data");
   let ap_mac = data
     .and_then(|d| d.get("ap"))
@@ -102,12 +101,13 @@ async fn handle_handshake_event(
     .to_string();
   let key = format!("{sta_mac} -> {ap_mac} ");
 
+  let session = sm.get_session().await;
   let mut state = session.state.write();
 
   let entry = state.handshakes.entry(key.clone());
-  let text = match entry {
+  match entry {
     std::collections::hash_map::Entry::Occupied(_) => {
-      LOGGER.log_debug("Agent", &format!("Handshake already exists for {ap_mac} -> {sta_mac}"));
+      LOGGER.log_debug("Agent", &format!("Handshake already exists for {sta_mac} -> {ap_mac}"));
       return;
     }
     std::collections::hash_map::Entry::Vacant(entry) => {
@@ -116,38 +116,48 @@ async fn handle_handshake_event(
         filename,
         timestamp: std::time::SystemTime::now(),
       });
-
-      let last_pwned = find_ap_sta_in_session(&session, &sta_mac, &ap_mac);
-
-      if let Some((ap, sta)) = last_pwned {
-        let ap_stap = STAP::AccessPoint(&ap.clone());
-        let hostname = hostname_or_mac(&ap_stap);
-        LOGGER.log_info(
-          "Agent",
-          &format!(
-            "!!! captured new handshake on channel {}, {} dBm: {} ({}) -> {} [{} ({})] !!!",
-            ap.channel, ap.rssi, sta.mac, sta.vendor, ap.hostname, ap.mac, ap.vendor
-          ),
-        );
-        state.last_pwned = Some(hostname.to_string());
-      } else {
-        LOGGER.log_info("Agent", &format!("!!! captured new handshake: {key} !!!"));
-        state.last_pwned = Some(ap_mac.clone());
-      }
-
-      let total = total_unique_handshakes(&config().bettercap.handshakes);
-      let handshake_count = state.handshakes.len();
-
-      let mut text = format!("{handshake_count} ({total:02})");
-      if let Some(last_pwned) = &state.last_pwned {
-        let _ = write!(text, " [{last_pwned}]");
-      }
-      drop(state);
-      text
     }
-  };
+  }
+  drop(state);
 
-  epoch.lock().track("handshake", Some(1));
+  let state = session.state.read();
+  let last_pwned_hostname = find_ap_sta_in_session(&session, &sta_mac, &ap_mac)
+    .map(|(ap, sta)| {
+      LOGGER.log_info(
+        "Agent",
+        &format!(
+          "!!! captured new handshake on channel {}, {} dBm: {} ({}) -> {} [{} ({})] !!!",
+          ap.channel,
+          ap.rssi,
+          sta.mac,
+          sta.vendor,
+          hostname_or_mac(&ap),
+          ap.mac,
+          ap.vendor
+        ),
+      );
+      hostname_or_mac(&ap).to_string()
+    })
+    .unwrap_or(ap_mac.clone());
+  drop(state);
+
+  let mut state = session.state.write();
+  state.last_pwned = Some(last_pwned_hostname.clone());
+
+  let total = total_unique_handshakes(&config().bettercap.handshakes);
+  let handshake_count = state.handshakes.len();
+  let mut text = format!("{handshake_count} ({total:02})");
+
+  if let Some(last) = &state.last_pwned {
+    let _ = write!(text, " [{last}]");
+  }
+  drop(state);
+
+  {
+    let mut epoch_guard = epoch.lock();
+    epoch_guard.track("handshake", Some(1));
+  }
+
   view.set("shakes", StateValue::Text(text));
   view.on_handshakes(1);
 }
