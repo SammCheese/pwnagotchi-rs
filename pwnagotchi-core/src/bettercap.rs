@@ -70,7 +70,6 @@ impl BettercapController for BettercapHandle {
 
 #[derive(Debug, Clone)]
 pub struct Bettercap {
-  pub bettercap_path: Cow<'static, str>,
   pub retries: u32,
   pub ping_timeout: u64,
   pub ping_interval: u64,
@@ -152,7 +151,6 @@ impl Bettercap {
     let req_client = Agent::new_with_config(agent_config);
 
     Self {
-      bettercap_path: Cow::Borrowed(&config().main.bettercap_path),
       retries: 5,
       ping_timeout: 180,
       ping_interval: 15,

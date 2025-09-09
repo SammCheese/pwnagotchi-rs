@@ -8,13 +8,15 @@ pub struct MainConfig {
   pub name: Cow<'static, str>,
   pub mode: Cow<'static, str>,
   pub lang: Cow<'static, str>,
-  pub interface: Cow<'static, str>,
+  pub iface: Cow<'static, str>,
   pub mon_start_cmd: Cow<'static, str>,
   pub mon_stop_cmd: Cow<'static, str>,
-  pub whitelist: Vec<Cow<'static, str>>,
-  pub bettercap_path: Cow<'static, str>,
+  pub mon_max_blind_epochs: u32,
   pub no_restart: bool,
-  pub log: Cow<'static, str>,
+  pub whitelist: Vec<Cow<'static, str>>,
+  //confd
+  //custom_plugin_repos
+  //custom plugins
 }
 
 impl Default for MainConfig {
@@ -23,13 +25,12 @@ impl Default for MainConfig {
       name: "pwnagotchi".into(),
       mode: "auto".into(),
       lang: "en".into(),
-      interface: "wlan0mon".into(),
+      iface: "wlan0mon".into(),
       whitelist: vec![],
-      bettercap_path: "/usr/bin/bettercap".into(),
       mon_start_cmd: "/usr/bin/monstart".into(),
       mon_stop_cmd: "/usr/bin/monstop".into(),
+      mon_max_blind_epochs: 5,
       no_restart: false,
-      log: "/etc/pwnagotchi/log/pwnagotchi.log".into(),
     }
   }
 }

@@ -4,6 +4,7 @@ mod bettercap;
 mod debug;
 mod faces;
 mod fs;
+mod log;
 mod main;
 mod personality;
 mod plugins;
@@ -15,6 +16,7 @@ pub use bettercap::BettercapConfig;
 pub use debug::DebugConfig;
 pub use faces::FaceConfig;
 pub use fs::FSConfig;
+pub use log::LogConfig;
 pub use main::MainConfig;
 pub use personality::PersonalityConfig;
 pub use plugins::PluginConfig;
@@ -32,6 +34,7 @@ pub struct Config {
   pub ui: UIConfig,
   pub faces: FaceConfig,
   pub debug: DebugConfig,
+  pub log: LogConfig,
 }
 
 impl Display for Config {

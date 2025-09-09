@@ -105,12 +105,12 @@ impl Log {
 
 impl Default for Log {
   fn default() -> Self {
-    Self { file: config().main.log.to_string() }
+    Self { file: config().log.path.to_string() }
   }
 }
 
 pub static LOGGER: std::sync::LazyLock<Log> = std::sync::LazyLock::new(|| {
-  let log = Log::new(&config().main.log);
+  let log = Log::new(&config().log.path);
   log.log_info("", "#=========== STARTED ===========#");
   log
 });

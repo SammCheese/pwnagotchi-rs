@@ -29,7 +29,6 @@ impl Default for BettercapConfig {
       "wifi.ap.new",
       "wifi.ap.lost",
       "mod.started",
-      "sys.log",
     ]
     .into_iter()
     .map(Cow::Borrowed)

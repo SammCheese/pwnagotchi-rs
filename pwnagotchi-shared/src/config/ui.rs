@@ -48,9 +48,9 @@ impl Default for UIConfig {
         enabled: true,
         address: "127.0.0.1".into(),
         port: 8080,
-        username: "user".into(),
-        password: "pass".into(),
-        origin: "http://localhost".into(),
+        username: "".into(),
+        password: "".into(),
+        origin: "".into(),
         on_frame: "".into(),
       },
       display: UIDisplayConfig {

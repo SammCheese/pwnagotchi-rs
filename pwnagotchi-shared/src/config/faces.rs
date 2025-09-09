@@ -65,7 +65,7 @@ impl Default for FaceConfig {
       upload2: "(0__1)".into(),
       png: false,
       position_x: 0,
-      position_y: 40,
+      position_y: 34,
     }
   }
 }

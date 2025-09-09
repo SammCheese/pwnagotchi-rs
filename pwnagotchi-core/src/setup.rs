@@ -30,7 +30,7 @@ async fn setup_events(bc: &Arc<dyn BettercapController>) {
 }
 
 async fn reset_wifi_settings(bc: &Arc<dyn BettercapController>) {
-  let interface = &config().main.interface;
+  let interface = &config().main.iface;
   let ap_ttl = format!("{}", config().personality.ap_ttl);
   let sta_ttl = format!("{}", config().personality.sta_ttl);
   let min_rssi = format!("{}", config().personality.min_rssi);
@@ -87,7 +87,7 @@ async fn reset_wifi_settings(bc: &Arc<dyn BettercapController>) {
 }
 
 async fn start_monitor_mode(bc: &Arc<dyn BettercapController>) {
-  let interface = &config().main.interface;
+  let interface = &config().main.iface;
   let mon_start_cmd = &config().main.mon_start_cmd;
   let no_restart = &config().main.no_restart;
   let mut is_starting = false;
