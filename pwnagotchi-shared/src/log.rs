@@ -1,5 +1,5 @@
 use std::{
-  fs::{self, OpenOptions},
+  fs::{self, File, OpenOptions},
   io::Write,
   path::Path,
   sync::Mutex,
@@ -19,23 +19,12 @@ pub enum LogLevel {
 }
 
 pub struct Log {
-  file: Mutex<std::fs::File>,
-  min_level: LogLevel,
-}
-
-#[allow(dead_code)]
-fn string_to_loglevel(level: &str) -> LogLevel {
-  match level.to_lowercase().as_str() {
-    "debug" => LogLevel::Debug,
-    "warning" => LogLevel::Warning,
-    "error" => LogLevel::Error,
-    "fatal" => LogLevel::Fatal,
-    _ => LogLevel::Info,
-  }
+  file: Mutex<File>,
+  debug_file: Mutex<File>,
 }
 
 impl Log {
-  pub fn new(path: &str) -> Self {
+  pub fn new(path: &str, debug_path: &str) -> Self {
     let p = Path::new(path);
     if let Some(parent) = p.parent()
       && !parent.exists()
@@ -49,28 +38,38 @@ impl Log {
       .append(true)
       .open(path)
       .expect("Failed to open log file");
+    let debug_file = OpenOptions::new()
+      .create(true)
+      .append(true)
+      .open(debug_path)
+      .expect("Failed to open debug log file");
 
     Self {
       file: Mutex::new(file),
-      min_level: if config().debug.enabled { LogLevel::Debug } else { LogLevel::Info },
+      debug_file: Mutex::new(debug_file),
     }
   }
 
-  pub fn log(&self, origin: &str, message: &str, level: LogLevel) {
-    if level < self.min_level {
-      return;
-    }
-
-    let ts = OffsetDateTime::now_utc();
+  pub fn log(&self, origin: Option<&str>, message: &str, level: LogLevel) {
+    let time = OffsetDateTime::now_utc();
     let entry = format!(
-      "[{}] [{}] [{}] {}\n",
-      ts.format(&time::format_description::well_known::Rfc3339).unwrap(),
+      "[{}] [{}] {} {}\n",
+      time.format(&time::format_description::well_known::Rfc3339).unwrap(),
       format!("{:?}", level).to_uppercase(),
-      origin,
+      origin.map_or("".to_string(), |o| format!("[{}]", o)),
       message
     );
 
-    if let Ok(mut file) = self.file.lock()
+    // Log Everything to debug log
+    if let Ok(mut debug_file) = self.debug_file.lock()
+      && let Err(e) = debug_file.write_all(entry.as_bytes())
+    {
+      eprintln!("Failed to write debug log entry: {e}");
+    }
+
+    // Only log Info and above to normal log
+    if level >= LogLevel::Info
+      && let Ok(mut file) = self.file.lock()
       && let Err(e) = file.write_all(entry.as_bytes())
     {
       eprintln!("Failed to write log entry: {e}");
@@ -78,28 +77,28 @@ impl Log {
   }
 
   pub fn log_debug(&self, origin: &str, message: &str) {
-    self.log(origin, message, LogLevel::Debug);
+    self.log(Some(origin), message, LogLevel::Debug);
   }
 
   pub fn log_info(&self, origin: &str, message: &str) {
-    self.log(origin, message, LogLevel::Info);
+    self.log(Some(origin), message, LogLevel::Info);
   }
 
   pub fn log_warning(&self, origin: &str, message: &str) {
-    self.log(origin, message, LogLevel::Warning);
+    self.log(Some(origin), message, LogLevel::Warning);
   }
 
   pub fn log_error(&self, origin: &str, message: &str) {
-    self.log(origin, message, LogLevel::Error);
+    self.log(Some(origin), message, LogLevel::Error);
   }
 
   pub fn log_fatal(&self, origin: &str, message: &str) {
-    self.log(origin, message, LogLevel::Fatal);
+    self.log(Some(origin), message, LogLevel::Fatal);
   }
 }
 
 pub static LOGGER: std::sync::LazyLock<Log> = std::sync::LazyLock::new(|| {
-  let log = Log::new(&config().log.path);
-  log.log("", "=========== STARTED ===========", LogLevel::Info);
+  let log = Log::new(&config().log.path, &config().log.path_debug);
+  log.log(None, "=========== STARTED ===========", LogLevel::Info);
   log
 });

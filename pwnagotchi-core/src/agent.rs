@@ -16,7 +16,7 @@ use pwnagotchi_shared::{
   },
   sessions::{manager::SessionManager, session::Session},
   traits::{automata::AgentObserver, ui::ViewTrait},
-  types::ui::StateValue,
+  types::{epoch::Activity, ui::StateValue},
 };
 use serde::{Deserialize, Serialize};
 
@@ -179,7 +179,7 @@ impl Agent {
       }
     }
 
-    LOGGER.log_debug("RECON", &format!("Recon time set to {recon_time} seconds"));
+    LOGGER.log_info("RECON", &format!("Recon time set to {recon_time} seconds"));
     self.observer.wait_for(recon_time, Some(false)).await;
   }
 
@@ -230,7 +230,7 @@ impl Agent {
             );
 
             {
-              self.epoch.lock().track("association", Some(1));
+              self.epoch.lock().track(Activity::Association, Some(1));
             }
           }
           Err(e) => {
@@ -301,7 +301,7 @@ impl Agent {
               ),
             );
 
-            self.epoch.lock().track("deauth", Some(1));
+            self.epoch.lock().track(Activity::Deauth, Some(1));
           }
           Err(e) => {
             self.observer.on_error(ap, e.to_string().as_str());
@@ -399,7 +399,7 @@ impl Agent {
       match rx.await {
         Ok(Ok(())) => {
           sm.get_session().await.state.write().current_channel = channel;
-          self.epoch.lock().track("hop", Some(1));
+          self.epoch.lock().track(Activity::Hop, Some(1));
           self.view.set("channel", StateValue::Number(channel.into()));
           LOGGER.log_info("AGENT", &format!("Switched to channel {channel}"));
         }

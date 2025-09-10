@@ -2,7 +2,7 @@ use pwnagotchi_shared::{traits::ui::Widget, types::ui::StateValue};
 use rgb::Rgba;
 use tiny_skia::{Color as SkiaColor, Paint, PathBuilder, PixmapMut as RgbaImage, Rect, Stroke};
 
-use crate::ui::draw::draw_text_mut;
+use crate::ui::{draw::draw_text_mut, fonts::DEFAULT_FONTNAME};
 
 #[derive(Clone)]
 pub struct TextStyle {
@@ -17,7 +17,7 @@ pub struct TextStyle {
 impl Default for TextStyle {
   fn default() -> Self {
     Self {
-      font: "DejaVu Sans Mono".to_string(),
+      font: DEFAULT_FONTNAME.to_string(),
       color: Rgba { r: 255, g: 255, b: 255, a: 255 },
       size: 14.0,
       weight: cosmic_text::Weight::NORMAL,
@@ -162,8 +162,9 @@ pub struct TextWidget {
 }
 
 impl TextWidget {
-  pub fn new(xy: (u32, u32), value: impl Into<String>, style: TextStyle) -> Self {
-    Self { xy, value: value.into(), style }
+  #[must_use]
+  pub const fn new(xy: (u32, u32), value: String, style: TextStyle) -> Self {
+    Self { xy, value, style }
   }
 }
 
@@ -183,17 +184,11 @@ impl Widget for TextWidget {
   fn set_value(&mut self, value: StateValue) {
     match value {
       StateValue::None => {}
-      StateValue::Face(face) => {
-        self.value = format!("{face:?}");
-      }
       StateValue::Text(text) => {
         self.value = text;
       }
       StateValue::Number(num) => {
         self.value = num.to_string();
-      }
-      StateValue::Bool(b) => {
-        self.value = b.to_string();
       }
     }
   }
@@ -255,17 +250,11 @@ impl Widget for LabeledValue {
   fn set_value(&mut self, value: StateValue) {
     match value {
       StateValue::None => {}
-      StateValue::Face(face) => {
-        self.value = format!("{face:?}");
-      }
       StateValue::Text(text) => {
         self.value = text;
       }
       StateValue::Number(num) => {
         self.value = num.to_string();
-      }
-      StateValue::Bool(b) => {
-        self.value = b.to_string();
       }
     }
   }

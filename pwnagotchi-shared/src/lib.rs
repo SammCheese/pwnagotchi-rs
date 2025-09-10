@@ -3,15 +3,13 @@ pub mod log;
 
 pub mod traits {
   pub mod automata;
-  pub mod hostname;
   pub mod logger;
-  pub mod syscontrol;
-  pub mod sysdata;
   pub mod ui;
   pub mod voice;
 }
 
 pub mod types {
+  pub mod epoch;
   pub mod ui;
 }
 

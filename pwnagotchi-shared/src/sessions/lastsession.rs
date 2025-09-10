@@ -15,8 +15,10 @@ impl LastSession {
   pub fn new(view: &Arc<dyn ViewTrait + Send + Sync>) -> Self {
     let log_path = &config().log.path;
     let stats = SessionParser::from_file(log_path, view).ok();
-    LOGGER
-      .log_info("LastSession", &format!("Loaded Session data from log file: {:?}", stats.as_ref()));
+    LOGGER.log_debug(
+      "LastSession",
+      &format!("Loaded Session data from log file: {:?}", stats.as_ref()),
+    );
     Self { stats }
   }
 

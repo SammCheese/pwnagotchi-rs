@@ -6,7 +6,7 @@ use pwnagotchi_shared::{
   models::net::Handshake,
   sessions::manager::SessionManager,
   traits::ui::ViewTrait,
-  types::ui::StateValue,
+  types::{epoch::Activity, ui::StateValue},
   utils::general::{hostname_or_mac, total_unique_handshakes},
 };
 use serde_json::Value;
@@ -77,6 +77,8 @@ pub async fn start_event_loop(
   }
 }
 
+// Sorry for anyone who has to look at this
+// State and Mutex gets messy reaaaally fast
 pub async fn handle_handshake_event(
   jmsg: &Value,
   sm: &Arc<SessionManager>,
@@ -153,11 +155,7 @@ pub async fn handle_handshake_event(
   }
   drop(state);
 
-  {
-    let mut epoch_guard = epoch.lock();
-    epoch_guard.track("handshake", Some(1));
-  }
-
+  epoch.lock().track(Activity::Handshake, Some(1));
   view.set("shakes", StateValue::Text(text));
   view.on_handshakes(1);
 }

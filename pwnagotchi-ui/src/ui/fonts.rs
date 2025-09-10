@@ -4,8 +4,8 @@ use cosmic_text::{FontSystem, SwashCache};
 
 use crate::web::server::FONT_ASSETS;
 
-const FONTNAME: &str = "DejaVu Sans Mono";
-pub static STATUS_FONT_NAME: &str = FONTNAME;
+pub const DEFAULT_FONTNAME: &str = "DejaVu Sans Mono";
+pub static STATUS_FONT_NAME: &str = DEFAULT_FONTNAME;
 pub static SIZE_OFFSET: f32 = 0.0;
 
 #[derive(Eq, Hash, PartialEq)]

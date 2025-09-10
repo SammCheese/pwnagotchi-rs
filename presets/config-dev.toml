@@ -1,0 +1,22 @@
+[main]
+name = "pwnagotchi"
+lang = "en"
+mon_start_cmd = "echo 'Interface put into monitor mode'"
+
+[bettercap]
+handshakes = "./test/handshakes/"
+
+[log]
+path = "./test/logs/pwnagotchi.log"
+path_debug = "./test/logs/pwnagotchi-debug.log"
+
+[ui]
+inverted = false
+fps = 1.0
+
+[debug]
+enabled = true
+font_name = "DejaVu Sans Mono"
+recovery_file = "./test/.recovery-file"
+last_session_file = "./test/.pwnagotchi-last-session"
+identity_path =  "./test/.ssh/"

@@ -204,7 +204,7 @@ impl Bettercap {
     cli.map_or(None, |mut resp| match resp.body_mut().read_json::<BettercapSession>() {
       Ok(session) => Some(session),
       Err(e) => {
-        LOGGER.log_error("Bettercap", &format!("Failed to parse session JSON: {e}"));
+        LOGGER.log_error("Bettercap", &format!("Failed to parse Bettercap session JSON: {e}"));
         None
       }
     })
@@ -215,13 +215,13 @@ impl Bettercap {
     let min_sleep = self.min_sleep;
     let max_sleep = self.max_sleep;
 
-    loop {
-      LOGGER.log_info("Bettercap", &format!("Connecting websocket to {ws_url}"));
+    LOGGER.log_info("Bettercap", "Connecting to Event WebSocket");
 
+    loop {
       match connect_async(&ws_url).await {
         Ok((ws_stream, _)) => {
           self.is_ready.store(true, Ordering::SeqCst);
-          LOGGER.log_info("Bettercap", "WebSocket connected");
+          LOGGER.log_info("Bettercap", "Event WebSocket connected");
           let (mut write, mut read) = ws_stream.split();
           while let Some(msg) = read.next().await {
             match msg {
@@ -230,16 +230,16 @@ impl Bettercap {
               }
               Ok(Message::Binary(_) | Message::Ping(_) | Message::Pong(_) | Message::Frame(_)) => {}
               Ok(Message::Close(_)) => {
-                LOGGER.log_warning("Bettercap", "WebSocket closed by server");
+                LOGGER.log_warning("Bettercap", "Event WebSocket closed by server");
                 self.is_ready.store(false, Ordering::SeqCst);
                 break;
               }
               Err(_e) => {
+                LOGGER.log_warning("Bettercap", "Lost Event Websocket, attempting to reconnect...");
                 self.is_ready.store(false, Ordering::SeqCst);
                 // Still there?
-                if let Err(ping_err) = write.send(Message::Ping(vec![].into())).await {
-                  LOGGER
-                    .log_warning("Bettercap", &format!("Ping failed: {ping_err}, reconnecting..."));
+                if (write.send(Message::Ping(vec![].into())).await).is_err() {
+                  LOGGER.log_warning("Bettercap", "Ping to Event Websocket failed, this is bad...");
                   break;
                 }
                 LOGGER.log_warning("Bettercap", "Ping OK, keeping connection alive...");
@@ -250,7 +250,7 @@ impl Bettercap {
         Err(_e) => {}
       }
       let sleep_time = (max_sleep - min_sleep).mul_add(fastrand::f64(), min_sleep);
-      LOGGER.log_info("Bettercap", &format!("Reconnecting in {sleep_time:.1} seconds"));
+      LOGGER.log_debug("Bettercap", &format!("Reconnecting in {sleep_time:.1} seconds"));
       tokio::time::sleep(Duration::from_secs_f64(sleep_time)).await;
     }
   }

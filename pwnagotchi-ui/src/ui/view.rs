@@ -19,10 +19,7 @@ use pwnagotchi_shared::{
     voice::VoiceTrait,
   },
   types::ui::{FaceType, StateValue},
-  utils::{
-    faces::face_to_string,
-    general::{format_duration_human, total_unique_handshakes},
-  },
+  utils::general::{format_duration_human, total_unique_handshakes},
 };
 use rgb::Rgba;
 use tiny_skia::PixmapMut as RgbaImage;
@@ -81,12 +78,12 @@ impl ViewTrait for View {
       if was_normal || step > 5 {
         if sleeping {
           if secs > 1.0 {
-            self.set("face", StateValue::Face(FaceType::Sleep));
+            self.set("face", StateValue::Text(FaceType::Sleep.to_string()));
 
             #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
             self.set("status", StateValue::Text(self.voice.on_napping(secs as u64)));
           } else {
-            self.set("face", StateValue::Face(FaceType::Sleep2));
+            self.set("face", StateValue::Text(FaceType::Sleep2.to_string()));
 
             self.set("status", StateValue::Text(self.voice.on_awakening()));
           }
@@ -104,7 +101,7 @@ impl ViewTrait for View {
             FaceType::LookL
           };
 
-          self.set("face", StateValue::Face(face));
+          self.set("face", StateValue::Text(face.to_string()));
         }
       }
 
@@ -118,7 +115,7 @@ impl ViewTrait for View {
 
   fn on_starting(&self) {
     self.set("status", StateValue::Text(self.voice.on_starting()));
-    self.set("face", StateValue::Face(FaceType::Awake));
+    self.set("face", StateValue::Text(FaceType::Awake.to_string()));
   }
 
   fn on_manual_mode(&self, last_session: &LastSession) {
@@ -130,10 +127,10 @@ impl ViewTrait for View {
     self.set("mode", StateValue::Text("MANU".into()));
     self.set(
       "face",
-      StateValue::Face(if session.epochs.epochs > 3 && session.handshakes == 0 {
-        FaceType::Sad
+      StateValue::Text(if session.epochs.epochs > 3 && session.handshakes == 0 {
+        FaceType::Sad.to_string()
       } else {
-        FaceType::Happy
+        FaceType::Happy.to_string()
       }),
     );
 
@@ -208,123 +205,123 @@ impl ViewTrait for View {
       ];
       *fastrand::choice(&faces).unwrap_or(&FaceType::Excited)
     };
-    self.set("face", StateValue::Face(face));
+    self.set("face", StateValue::Text(face.to_string()));
     self.set("status", StateValue::Text(self.voice.on_new_peer(peer)));
     self.update(None, None);
     std::thread::sleep(std::time::Duration::from_secs(3));
   }
 
   fn on_keys_generation(&self) {
-    self.set("face", StateValue::Face(FaceType::Awake));
+    self.set("face", StateValue::Text(FaceType::Awake.to_string()));
     self.set("status", StateValue::Text(self.voice.on_keys_generation()));
     self.update(None, None);
   }
 
   fn on_normal(&self) {
-    self.set("face", StateValue::Face(FaceType::Awake));
+    self.set("face", StateValue::Text(FaceType::Awake.to_string()));
     self.set("status", StateValue::Text(self.voice.on_normal()));
     self.update(None, None);
   }
 
   fn on_lost_peer(&self, peer: &Peer) {
-    self.set("face", StateValue::Face(FaceType::Lonely));
+    self.set("face", StateValue::Text(FaceType::Lonely.to_string()));
     self.set("status", StateValue::Text(self.voice.on_lost_peer(peer)));
     self.update(None, None);
   }
 
   fn on_free_channel(&self, channel: u8) {
-    self.set("face", StateValue::Face(FaceType::Smart));
+    self.set("face", StateValue::Text(FaceType::Smart.to_string()));
     self.set("status", StateValue::Text(self.voice.on_free_channel(channel)));
     self.update(None, None);
   }
 
   fn on_reading_logs(&self, lines: u64) {
-    self.set("face", StateValue::Face(FaceType::Smart));
+    self.set("face", StateValue::Text(FaceType::Smart.to_string()));
     self.set("status", StateValue::Text(self.voice.on_reading_logs(lines)));
     self.update(None, None);
   }
 
   fn on_shutdown(&mut self) {
-    self.set("face", StateValue::Face(FaceType::Sleep));
+    self.set("face", StateValue::Text(FaceType::Sleep.to_string()));
     self.set("status", StateValue::Text(self.voice.on_shutdown()));
     self.update(None, None);
     self.frozen = true;
   }
 
   fn on_bored(&self) {
-    self.set("face", StateValue::Face(FaceType::Bored));
+    self.set("face", StateValue::Text(FaceType::Bored.to_string()));
     self.set("status", StateValue::Text(self.voice.on_bored()));
     self.update(None, None);
   }
 
   fn on_sad(&self) {
-    self.set("face", StateValue::Face(FaceType::Sad));
+    self.set("face", StateValue::Text(FaceType::Sad.to_string()));
     self.set("status", StateValue::Text(self.voice.on_sad()));
     self.update(None, None);
   }
 
   fn on_angry(&self) {
-    self.set("face", StateValue::Face(FaceType::Angry));
+    self.set("face", StateValue::Text(FaceType::Angry.to_string()));
     self.set("status", StateValue::Text(self.voice.on_angry()));
     self.update(None, None);
   }
 
   fn on_motivated(&self) {
-    self.set("face", StateValue::Face(FaceType::Motivated));
+    self.set("face", StateValue::Text(FaceType::Motivated.to_string()));
     self.set("status", StateValue::Text(self.voice.on_motivated()));
     self.update(None, None);
   }
 
   fn on_demotivated(&self) {
-    self.set("face", StateValue::Face(FaceType::Demotivated));
+    self.set("face", StateValue::Text(FaceType::Demotivated.to_string()));
     self.set("status", StateValue::Text(self.voice.on_demotivated()));
     self.update(None, None);
   }
 
   fn on_excited(&self) {
-    self.set("face", StateValue::Face(FaceType::Excited));
+    self.set("face", StateValue::Text(FaceType::Excited.to_string()));
     self.set("status", StateValue::Text(self.voice.on_excited()));
     self.update(None, None);
   }
 
   fn on_assoc(&self, ap: &AccessPoint) {
-    self.set("face", StateValue::Face(FaceType::Intense));
+    self.set("face", StateValue::Text(FaceType::Intense.to_string()));
     self.set("status", StateValue::Text(self.voice.on_assoc(ap)));
     self.update(None, None);
   }
 
   fn on_deauth(&self, who: &Station) {
-    self.set("face", StateValue::Face(FaceType::Cool));
+    self.set("face", StateValue::Text(FaceType::Cool.to_string()));
     self.set("status", StateValue::Text(self.voice.on_deauth(who)));
     self.update(None, None);
   }
 
   fn on_miss(&self, who: &AccessPoint) {
-    self.set("face", StateValue::Face(FaceType::Sad));
+    self.set("face", StateValue::Text(FaceType::Sad.to_string()));
     self.set("status", StateValue::Text(self.voice.on_miss(&who.mac)));
     self.update(None, None);
   }
 
   fn on_grateful(&self) {
-    self.set("face", StateValue::Face(FaceType::Grateful));
+    self.set("face", StateValue::Text(FaceType::Grateful.to_string()));
     self.set("status", StateValue::Text(self.voice.on_grateful()));
     self.update(None, None);
   }
 
   fn on_lonely(&self) {
-    self.set("face", StateValue::Face(FaceType::Lonely));
+    self.set("face", StateValue::Text(FaceType::Lonely.to_string()));
     self.set("status", StateValue::Text(self.voice.on_lonely()));
     self.update(None, None);
   }
 
   fn on_handshakes(&self, count: u32) {
-    self.set("face", StateValue::Face(FaceType::Happy));
+    self.set("face", StateValue::Text(FaceType::Happy.to_string()));
     self.set("status", StateValue::Text(self.voice.on_handshakes(count)));
     self.update(None, None);
   }
 
   fn on_unread_messages(&self, count: u32) {
-    self.set("face", StateValue::Face(FaceType::Excited));
+    self.set("face", StateValue::Text(FaceType::Excited.to_string()));
     self.set("status", StateValue::Text(self.voice.on_unread_messages(count)));
     self.update(None, None);
     std::thread::sleep(Duration::from_millis(100));
@@ -337,21 +334,19 @@ impl ViewTrait for View {
       FaceType::Upload2,
     ];
 
-    self.set("face", StateValue::Face(faces[fastrand::usize(..faces.len())]));
-
+    self.set("face", StateValue::Text(faces[fastrand::usize(..faces.len())].to_string()));
     self.set("status", StateValue::Text(self.voice.on_uploading(to)));
-
     self.update(Some(true), None);
   }
 
   fn on_rebooting(&self) {
-    self.set("face", StateValue::Face(FaceType::Broken));
+    self.set("face", StateValue::Text(FaceType::Broken.to_string()));
     self.set("status", StateValue::Text(self.voice.on_rebooting()));
     self.update(None, None);
   }
 
   fn on_custom(&self, text: &str) {
-    self.set("face", StateValue::Face(FaceType::Debug));
+    self.set("face", StateValue::Text(FaceType::Debug.to_string()));
     self.set("status", StateValue::Text(self.voice.custom(text)));
     self.update(None, None);
   }
@@ -361,11 +356,6 @@ impl ViewTrait for View {
   }
 
   fn set(&self, key: &str, value: StateValue) {
-    let value = match value {
-      StateValue::Face(face) => StateValue::Text(face_to_string(&face)),
-      _ => value,
-    };
-
     self.state.lock().unwrap_or_else(PoisonError::into_inner).set(key, value);
   }
 
@@ -384,13 +374,12 @@ impl ViewTrait for View {
     ];
 
     let special_text: std::collections::HashSet<String> =
-      special_moods.iter().map(face_to_string).collect();
+      special_moods.iter().map(FaceType::to_string).collect();
 
     self.get("face").is_none_or(|face_arc| {
       let face = face_arc.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
 
       match face.get_value() {
-        StateValue::Face(f) => !special_moods.contains(&f),
         StateValue::Text(ref s) => !special_text.contains(s),
         _ => true,
       }
@@ -617,7 +606,7 @@ impl View {
   fn make_face_widget(pos: (u32, u32), fontname: &str, color: Rgba<u8>) -> TextWidget {
     TextWidget::new(
       pos,
-      face_to_string(&FaceType::Awake),
+      FaceType::Awake.to_string(),
       TextStyle {
         font: fontname.to_string(),
         color,
@@ -632,7 +621,7 @@ impl View {
   fn make_friend_name_widget(pos: (u32, u32), fontname: &str, color: Rgba<u8>) -> TextWidget {
     TextWidget::new(
       pos,
-      "",
+      String::new(),
       TextStyle {
         font: fontname.to_string(),
         color,
@@ -706,7 +695,7 @@ impl View {
   fn make_mode_widget(pos: (u32, u32), fontname: &str, color: Rgba<u8>) -> TextWidget {
     TextWidget::new(
       pos,
-      "AUTO",
+      "AUTO".to_string(),
       TextStyle {
         font: fontname.to_string(),
         color,

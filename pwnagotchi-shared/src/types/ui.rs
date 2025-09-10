@@ -1,10 +1,8 @@
-#[derive(Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, Debug)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum StateValue {
-  None,
-  Face(FaceType),
   Text(String),
-  Number(u64),
-  Bool(bool),
+  Number(f64),
+  None,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]

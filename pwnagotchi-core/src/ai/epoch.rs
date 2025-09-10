@@ -10,7 +10,9 @@ use std::{
   vec,
 };
 
-use pwnagotchi_shared::{config::config, log::LOGGER, mesh::peer::Peer, models::net::AccessPoint};
+use pwnagotchi_shared::{
+  config::config, log::LOGGER, mesh::peer::Peer, models::net::AccessPoint, types::epoch::Activity,
+};
 use tokio::sync::mpsc::{Receiver, Sender, channel};
 
 use crate::{ai::reward::RewardFunction, mesh::wifi};
@@ -52,7 +54,7 @@ pub struct Epoch {
   pub epoch_data_ready: bool,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct EpochData {
   pub duration_secs: f64,
   pub slept_for_secs: f64,
@@ -94,32 +96,6 @@ impl Default for Observation {
       aps: vec![0.0; 256],
       sta: vec![0.0; 256],
       peers: vec![0.0; 256],
-    }
-  }
-}
-
-impl Default for EpochData {
-  fn default() -> Self {
-    Self {
-      duration_secs: 0.0,
-      slept_for_secs: 0.0,
-      blind_for_epochs: 0,
-      inactive_for_epochs: 0,
-      active_for_epochs: 0,
-      sad_for_epochs: 0,
-      bored_for_epochs: 0,
-      missed_interactions: 0,
-      num_hops: 0,
-      num_peers: 0,
-      tot_bond: 0.0,
-      avg_bond: 0.0,
-      num_deauths: 0,
-      num_associations: 0,
-      num_handshakes: 0,
-      cpu_load: 0.0,
-      mem_usage: 0.0,
-      temperature: 0.0,
-      reward: 0.0,
     }
   }
 }
@@ -313,34 +289,33 @@ impl Epoch {
     self.any_activity = false;
   }
 
-  pub fn track(&mut self, activity: &str, increment: Option<u32>) {
+  pub fn track(&mut self, activity: Activity, increment: Option<u32>) {
     match activity {
-      "deauth" => {
+      Activity::Deauth => {
         self.did_deauth = true;
         self.num_deauths += increment.unwrap_or(1);
         self.any_activity = true;
       }
-      "association" => {
+      Activity::Association => {
         self.did_associate = true;
         self.num_assocs += increment.unwrap_or(1);
         self.any_activity = true;
       }
-      "miss" => {
+      Activity::Miss => {
         self.num_missed += increment.unwrap_or(1);
       }
-      "hop" => {
+      Activity::Hop => {
         self.num_hops += increment.unwrap_or(1);
         self.did_deauth = false;
         self.did_associate = false;
       }
-      "handshake" => {
+      Activity::Handshake => {
         self.num_handshakes += increment.unwrap_or(1);
         self.did_handshakes = true;
       }
-      "sleep" => {
+      Activity::Sleep => {
         self.num_slept += increment.unwrap_or(1);
       }
-      _ => (),
     }
   }
 

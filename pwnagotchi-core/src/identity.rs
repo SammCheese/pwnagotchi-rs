@@ -34,7 +34,8 @@ impl Default for Identity {
 
 impl Identity {
   pub fn new() -> Self {
-    let path = config().debug.identity_path.to_string();
+    // Ensure we handle handle paths consistently
+    let path = config().debug.identity_path.to_string().trim_end_matches('/').to_string();
     let priv_path = format!("{path}/id_rsa");
     let pub_path = format!("{priv_path}.pub");
     let fingerprint_path = format!("{path}/fingerprint");
@@ -58,7 +59,7 @@ impl Identity {
     if !path::Path::new(&self.path).exists()
       && let Err(e) = std::fs::create_dir_all(&self.path)
     {
-      LOGGER.log_error(
+      LOGGER.log_fatal(
         "IDENTITY",
         &format!("Failed to create identity directory {:?}: {e}", &self.path),
       );
@@ -71,8 +72,9 @@ impl Identity {
         Ok(()) => {
           break;
         }
-        Err(e) => {
-          LOGGER.log_error("IDENTITY", &format!("Key load failed: {e}. Regenerating..."));
+        Err(_) => {
+          // Warning because this might be the first run
+          LOGGER.log_warning("IDENTITY", "Keys failed to load. Regenerating keys.");
 
           let _ = Command::new("pwngrid").arg("-generate").arg("-keys").arg(&self.path).status();
           old_header_fix(Path::new(&self.pub_path));

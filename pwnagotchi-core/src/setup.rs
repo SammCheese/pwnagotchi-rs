@@ -156,16 +156,17 @@ async fn start_monitor_mode(bc: &Arc<dyn BettercapController>) {
 }
 
 async fn wait_for_bettercap(bc: &Arc<dyn BettercapController>) {
+  LOGGER.log_info("Agent", "Waiting for Bettercap...");
   loop {
     let (tx, rx) = tokio::sync::oneshot::channel();
 
     let _ = bc.send(BettercapCommand::GetSession { respond_to: tx }).await;
 
     if let Ok(Some(_session)) = rx.await {
+      LOGGER.log_info("Agent", "Bettercap is ready.");
       tokio::time::sleep(Duration::from_secs(1)).await;
       return;
     }
-    LOGGER.log_info("Agent", "Waiting for Bettercap...");
     tokio::time::sleep(Duration::from_secs(1)).await;
   }
 }

@@ -6,6 +6,7 @@ use pwnagotchi_shared::{
   log::LOGGER,
   models::net::AccessPoint,
   traits::{automata::AgentObserver, ui::ViewTrait},
+  types::epoch::Activity,
 };
 
 use crate::ai::Epoch;
@@ -33,7 +34,7 @@ impl AgentObserver for Automata {
   fn on_miss(&self, who: &AccessPoint) {
     LOGGER.log_info("Personality", "Missed an interaction :(");
     self.view.on_miss(who);
-    self.epoch.lock().track("miss", None);
+    self.epoch.lock().track(Activity::Miss, None);
   }
 
   fn on_error(&self, who: &AccessPoint, error: &str) {
@@ -128,7 +129,7 @@ impl AgentObserver for Automata {
   async fn wait_for(&self, duration: u32, sleeping: Option<bool>) {
     let sleeping = sleeping.unwrap_or(true);
     {
-      self.epoch.lock().track("sleep", Some(duration));
+      self.epoch.lock().track(Activity::Sleep, Some(duration));
     }
     self.view.wait(duration.into(), sleeping, &self.clone_as_trait()).await;
   }
