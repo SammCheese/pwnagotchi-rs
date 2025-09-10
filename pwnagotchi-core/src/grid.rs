@@ -3,7 +3,7 @@ const API_ADDRESS: &str = "http://127.0.0.1:8666/api/v1";
 use std::sync::LazyLock;
 
 use pwnagotchi_shared::{
-  config::config, log::LOGGER, models::grid::PeerResponse, sessions::lastsession::LastSession,
+  config::config, logger::LOGGER, models::grid::PeerResponse, sessions::lastsession::LastSession,
 };
 use ureq::{Agent, config::Config};
 

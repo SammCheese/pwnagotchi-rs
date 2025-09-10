@@ -1,5 +1,6 @@
 pub mod config;
-pub mod log;
+pub mod identity;
+pub mod logger;
 
 pub mod traits {
   pub mod automata;

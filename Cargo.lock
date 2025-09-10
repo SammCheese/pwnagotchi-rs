@@ -194,6 +194,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "axum-auth"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "93495037c01c639b198ecb926b58f7f1c0d61ae663edcd61b2dd679f2a0bffe6"
+dependencies = [
+ "axum-core",
+ "base64",
+ "http",
+]
+
+[[package]]
 name = "axum-core"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1298,10 +1309,8 @@ dependencies = [
  "parking_lot",
  "pwnagotchi-shared",
  "regex",
- "rsa",
  "serde",
  "serde_json",
- "sha2",
  "time",
  "tokio",
  "tokio-stream",
@@ -1341,6 +1350,7 @@ version = "1.0.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "base64",
  "fastrand",
  "flate2",
  "hex",
@@ -1349,8 +1359,10 @@ dependencies = [
  "png 0.18.0",
  "regex",
  "rgb",
+ "rsa",
  "serde",
  "serde_json",
+ "sha2",
  "time",
  "tiny-skia",
  "tokio",
@@ -1366,6 +1378,7 @@ dependencies = [
  "askama",
  "async-trait",
  "axum",
+ "axum-auth",
  "cosmic-text",
  "fastrand",
  "include_dir",
@@ -2249,9 +2262,9 @@ checksum = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
 
 [[package]]
 name = "ureq"
-version = "3.1.1"
+version = "3.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9504c6ba73daec8a6541440ab9fb64f97320251582292265420e5587559c9095"
+checksum = "99ba1025f18a4a3fc3e9b48c868e9beb4f24f4b4b1a325bada26bd4119f46537"
 dependencies = [
  "base64",
  "cookie_store",

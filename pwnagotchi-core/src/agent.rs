@@ -8,7 +8,7 @@ use std::{
 use parking_lot::Mutex;
 use pwnagotchi_shared::{
   config::config,
-  log::LOGGER,
+  logger::LOGGER,
   models::{
     agent::RunningMode,
     bettercap::BettercapSession,

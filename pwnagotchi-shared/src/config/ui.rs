@@ -15,6 +15,7 @@ pub struct UIConfig {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(default)]
 pub struct UIWebConfig {
   pub enabled: bool,
   pub address: Cow<'static, str>,
@@ -26,6 +27,7 @@ pub struct UIWebConfig {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(default)]
 pub struct UIDisplayConfig {
   pub enabled: bool,
   pub rotation: u32,
@@ -33,9 +35,43 @@ pub struct UIDisplayConfig {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(default)]
 pub struct UIFontConfig {
   pub size_offset: u32,
   pub name: String,
+}
+
+impl Default for UIWebConfig {
+  fn default() -> Self {
+    Self {
+      enabled: true,
+      address: "127.0.0.1".into(),
+      port: 8080,
+      username: "".into(),
+      password: "".into(),
+      origin: "".into(),
+      on_frame: "".into(),
+    }
+  }
+}
+
+impl Default for UIDisplayConfig {
+  fn default() -> Self {
+    Self {
+      enabled: false,
+      rotation: 180,
+      r#type: "waveshare_v4".into(),
+    }
+  }
+}
+
+impl Default for UIFontConfig {
+  fn default() -> Self {
+    Self {
+      size_offset: 0,
+      name: "DejaVuSansMono".into(),
+    }
+  }
 }
 
 impl Default for UIConfig {
@@ -44,24 +80,9 @@ impl Default for UIConfig {
       inverted: false,
       fps: 0.0,
       cursor: true,
-      web: UIWebConfig {
-        enabled: true,
-        address: "127.0.0.1".into(),
-        port: 8080,
-        username: "".into(),
-        password: "".into(),
-        origin: "".into(),
-        on_frame: "".into(),
-      },
-      display: UIDisplayConfig {
-        enabled: false,
-        rotation: 180,
-        r#type: "waveshare_v4".into(),
-      },
-      font: UIFontConfig {
-        size_offset: 0,
-        name: "DejaVuSansMono".into(),
-      },
+      web: UIWebConfig::default(),
+      display: UIDisplayConfig::default(),
+      font: UIFontConfig::default(),
     }
   }
 }

@@ -1,7 +1,7 @@
 use std::{sync::Arc, time::Duration};
 
 use pwnagotchi_shared::{
-  log::LOGGER, models::agent::RunningMode, sessions::manager::SessionManager,
+  logger::LOGGER, models::agent::RunningMode, sessions::manager::SessionManager,
   traits::automata::AgentObserver,
 };
 use tokio::time::sleep;

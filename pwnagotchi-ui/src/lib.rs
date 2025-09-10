@@ -19,6 +19,10 @@ pub mod ui {
 
 pub mod web {
   pub mod frame;
-  pub mod routes;
   pub mod server;
+  pub mod pages {
+    pub mod context;
+    pub mod handler;
+    pub mod routes;
+  }
 }

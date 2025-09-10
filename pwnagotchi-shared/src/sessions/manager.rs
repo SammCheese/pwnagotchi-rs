@@ -7,6 +7,7 @@ use crate::{
   traits::ui::ViewTrait,
 };
 
+#[derive(Clone)]
 pub struct SessionManager {
   current: Arc<RwLock<Arc<Session>>>,
   last: Arc<RwLock<Option<Arc<LastSession>>>>,

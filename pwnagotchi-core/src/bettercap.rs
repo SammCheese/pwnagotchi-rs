@@ -9,7 +9,7 @@ use std::{
 
 use base64::{Engine, engine::general_purpose};
 use futures_util::{SinkExt, StreamExt};
-use pwnagotchi_shared::{config::config, log::LOGGER, models::bettercap::BettercapSession};
+use pwnagotchi_shared::{config::config, logger::LOGGER, models::bettercap::BettercapSession};
 use tokio::sync::{broadcast, mpsc};
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
 use ureq::{

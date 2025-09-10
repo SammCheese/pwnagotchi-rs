@@ -11,6 +11,7 @@ pub struct LogConfig {
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(default)]
 pub struct LogRotationConfig {
   pub enabled: bool,
   pub size: Cow<'static, str>,

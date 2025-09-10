@@ -12,7 +12,6 @@ use pwnagotchi_core::{
   bettercap::{Bettercap, spawn_bettercap},
   cli,
   events::eventlistener::start_event_loop,
-  identity::Identity,
   mesh::advertiser::{AsyncAdvertiser, start_advertising},
   traits::bettercapcontroller::BettercapController,
   voice::Voice,
@@ -20,7 +19,8 @@ use pwnagotchi_core::{
 use pwnagotchi_hw::display::base::get_display_from_config;
 use pwnagotchi_shared::{
   config::{config, init_config},
-  log::LOGGER,
+  identity::Identity,
+  logger::LOGGER,
   sessions::manager::SessionManager,
   traits::{automata::AgentObserver, ui::ViewTrait, voice::VoiceTrait},
 };
@@ -64,7 +64,7 @@ pub struct PwnContext {
   pub session_manager: Arc<SessionManager>,
   pub view: Arc<dyn ViewTrait + Send + Sync>,
   pub epoch: Arc<Mutex<Epoch>>,
-  pub identity: Identity,
+  pub identity: Arc<Identity>,
   pub bettercap: Arc<Bettercap>,
   pub bc_controller: Arc<dyn BettercapController>,
   pub automata: Arc<dyn AgentObserver + Send + Sync>,
@@ -127,8 +127,9 @@ async fn main() {
   });
 
   // WEB UI
+  let ctx_clone = Arc::clone(&ctx);
   tokio::task::spawn(async move {
-    Server::new().start();
+    Server::new().start(&ctx_clone.session_manager, &ctx_clone.identity);
   });
 
   // Advertiser
@@ -162,7 +163,7 @@ async fn main() {
 }
 
 async fn build_context() -> PwnContext {
-  let identity = Identity::new();
+  let identity = Arc::new(Identity::new());
   let epoch = Arc::new(parking_lot::Mutex::new(Epoch::new()));
   let voice: Arc<dyn VoiceTrait + Send + Sync> = Arc::new(Voice::new());
   let view: Arc<dyn ViewTrait + Send + Sync> =

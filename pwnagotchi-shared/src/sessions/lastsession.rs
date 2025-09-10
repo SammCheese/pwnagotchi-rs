@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use crate::{
   config::config,
-  log::LOGGER,
+  logger::LOGGER,
   sessions::{session_parser::SessionParser, session_stats::SessionStats},
   traits::ui::ViewTrait,
 };

@@ -4,15 +4,14 @@ use std::{collections::HashMap, sync::Arc};
 
 use parking_lot::Mutex;
 use pwnagotchi_shared::{
-  config::config, log::LOGGER, mesh::peer::Peer, models::grid::Advertisement,
-  sessions::manager::SessionManager, traits::ui::ViewTrait, types::ui::StateValue,
-  utils::general::total_unique_handshakes,
+  config::config, identity::Identity, logger::LOGGER, mesh::peer::Peer,
+  models::grid::Advertisement, sessions::manager::SessionManager, traits::ui::ViewTrait,
+  types::ui::StateValue, utils::general::total_unique_handshakes,
 };
 
 use crate::{
   ai::Epoch,
   grid::{advertise, peers, set_advertisement_data},
-  identity::Identity,
 };
 
 pub struct AsyncAdvertiser {

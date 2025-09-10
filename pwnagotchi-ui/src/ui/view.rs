@@ -9,7 +9,7 @@ use std::{
 use pwnagotchi_hw::display::base::DisplayTrait;
 use pwnagotchi_shared::{
   config::config,
-  log::LOGGER,
+  logger::LOGGER,
   mesh::peer::Peer,
   models::net::{AccessPoint, Station},
   sessions::lastsession::LastSession,

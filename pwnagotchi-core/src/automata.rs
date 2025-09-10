@@ -3,7 +3,7 @@ use std::sync::Arc;
 use parking_lot::Mutex;
 use pwnagotchi_shared::{
   config::config,
-  log::LOGGER,
+  logger::LOGGER,
   models::net::AccessPoint,
   traits::{automata::AgentObserver, ui::ViewTrait},
   types::epoch::Activity,

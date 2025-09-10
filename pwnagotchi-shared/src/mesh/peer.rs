@@ -4,7 +4,7 @@ use time::OffsetDateTime;
 
 use crate::{
   config::config,
-  log::LOGGER,
+  logger::LOGGER,
   models::grid::{Advertisement, PeerResponse},
 };
 

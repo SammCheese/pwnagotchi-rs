@@ -11,7 +11,8 @@ use std::{
 };
 
 use pwnagotchi_shared::{
-  config::config, log::LOGGER, mesh::peer::Peer, models::net::AccessPoint, types::epoch::Activity,
+  config::config, logger::LOGGER, mesh::peer::Peer, models::net::AccessPoint,
+  types::epoch::Activity,
 };
 use tokio::sync::mpsc::{Receiver, Sender, channel};
 

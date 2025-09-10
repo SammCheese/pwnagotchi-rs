@@ -29,9 +29,9 @@
 <body>
 <div data-role="page">
 
-    {% if error != "" %}
+    {% if base.error != "" %}
     <div id="error" class="error ui-content" data-role="popup" data-overlay-theme="a" data-theme="b">
-        <p>{{ error }}</p>
+        <p>{{ base.error }}</p>
     </div>
     <script>
         $(function(){
@@ -45,9 +45,9 @@
     <div data-role="footer">
         <div data-role="navbar" data-iconpos="left">
             <ul>
-                {% for item in navigations %}
+                {% for item in base.navigations %}
                     <li class="navitem">
-                       <a href="{{ item.url }}" id="{{ item.id }}" data-icon="{{ item.icon }}" class="{% if active_page == item.id %}ui-btn-active{% endif %}">{{ item.label }}</a>
+                       <a href="{{ item.url }}" id="{{ item.id }}" data-icon="{{ item.icon }}" class="{% if base.active_page == item.id %}ui-btn-active{% endif %}">{{ item.label }}</a>
                     </li>
                 {% endfor %}
             </ul>

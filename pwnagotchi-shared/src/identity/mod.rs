@@ -4,7 +4,6 @@ use std::{
 };
 
 use base64::{Engine, engine::general_purpose};
-use pwnagotchi_shared::{config::config, log::LOGGER};
 use rsa::{
   Pss, RsaPrivateKey, RsaPublicKey,
   pkcs1::{DecodeRsaPrivateKey, EncodeRsaPublicKey},
@@ -13,6 +12,8 @@ use rsa::{
   traits::SignatureScheme,
 };
 use sha2::{Digest, Sha256};
+
+use crate::{config::config, logger::LOGGER};
 
 pub struct Identity {
   pub path: String,

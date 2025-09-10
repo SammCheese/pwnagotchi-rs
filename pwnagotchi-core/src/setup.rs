@@ -1,6 +1,6 @@
 use std::{sync::Arc, time::Duration};
 
-use pwnagotchi_shared::{config::config, log::LOGGER};
+use pwnagotchi_shared::{config::config, logger::LOGGER};
 
 use crate::{
   agent::{is_module_running, start_module},

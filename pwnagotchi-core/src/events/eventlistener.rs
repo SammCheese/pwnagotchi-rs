@@ -2,7 +2,7 @@ use std::{fmt::Write, sync::Arc};
 
 use pwnagotchi_shared::{
   config::config,
-  log::LOGGER,
+  logger::LOGGER,
   models::net::Handshake,
   sessions::manager::SessionManager,
   traits::ui::ViewTrait,

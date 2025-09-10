@@ -6,7 +6,7 @@
 )]
 
 use cosmic_text::{Attrs, Buffer, Color, Family, Metrics, Shaping, Weight};
-use pwnagotchi_shared::log::LOGGER;
+use pwnagotchi_shared::logger::LOGGER;
 use rgb::Rgba;
 use tiny_skia::{BlendMode, Paint, PixmapMut as RgbaImage, Rect, Transform};
 
