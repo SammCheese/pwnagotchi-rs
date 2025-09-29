@@ -1,4 +1,4 @@
-use pwnagotchi_shared::{traits::ui::Widget, types::ui::StateValue};
+use pwnagotchi_shared::traits::ui::Widget;
 use rgb::Rgba;
 use tiny_skia::{Color as SkiaColor, Paint, PathBuilder, PixmapMut as RgbaImage, Rect, Stroke};
 
@@ -62,9 +62,9 @@ impl Widget for Line {
       canvas.stroke_path(&path, &paint, &stroke, tiny_skia::Transform::identity(), None);
     }
   }
-  fn set_value(&mut self, _value: StateValue) {}
-  fn get_value(&self) -> StateValue {
-    StateValue::None
+  fn set_value(&mut self, _value: &str) {}
+  fn get_value(&self) -> &'static str {
+    ""
   }
 }
 
@@ -100,9 +100,9 @@ impl Widget for RectWidget {
     let stroke = Stroke { width: 1.0, ..Stroke::default() };
     canvas.stroke_path(&path, &paint, &stroke, tiny_skia::Transform::identity(), None);
   }
-  fn set_value(&mut self, _value: StateValue) {}
-  fn get_value(&self) -> StateValue {
-    StateValue::None
+  fn set_value(&mut self, _value: &str) {}
+  fn get_value(&self) -> &'static str {
+    ""
   }
 }
 
@@ -149,9 +149,9 @@ impl Widget for FilledRect {
       );
     }
   }
-  fn set_value(&mut self, _value: StateValue) {}
-  fn get_value(&self) -> StateValue {
-    StateValue::None
+  fn set_value(&mut self, _value: &str) {}
+  fn get_value(&self) -> &'static str {
+    ""
   }
 }
 
@@ -181,20 +181,12 @@ impl Widget for TextWidget {
     );
   }
 
-  fn set_value(&mut self, value: StateValue) {
-    match value {
-      StateValue::None => {}
-      StateValue::Text(text) => {
-        self.value = text;
-      }
-      StateValue::Number(num) => {
-        self.value = num.to_string();
-      }
-    }
+  fn set_value(&mut self, value: &str) {
+    self.value = value.to_string();
   }
 
-  fn get_value(&self) -> StateValue {
-    StateValue::Text(self.value.clone())
+  fn get_value(&self) -> &str {
+    &self.value
   }
 }
 
@@ -247,19 +239,11 @@ impl Widget for LabeledValue {
     );
   }
 
-  fn set_value(&mut self, value: StateValue) {
-    match value {
-      StateValue::None => {}
-      StateValue::Text(text) => {
-        self.value = text;
-      }
-      StateValue::Number(num) => {
-        self.value = num.to_string();
-      }
-    }
+  fn set_value(&mut self, value: &str) {
+    self.value = value.to_string();
   }
 
-  fn get_value(&self) -> StateValue {
-    StateValue::Text(self.value.clone())
+  fn get_value(&self) -> &str {
+    &self.value
   }
 }

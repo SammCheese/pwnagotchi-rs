@@ -19,6 +19,7 @@ pwnagotchi-shared = { path = "../pwnagotchi-shared" }
 
 tokio.workspace = true
 parking_lot.workspace = true
+anyhow.workspace = true
 
 clap = { version = "4.5.47", features = ["derive"] }
 clap_complete = "4.5.57"

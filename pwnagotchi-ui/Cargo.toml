@@ -24,6 +24,8 @@ fastrand.workspace = true
 tiny-skia.workspace = true
 png.workspace = true
 rgb.workspace = true
+anyhow.workspace = true
+parking_lot.workspace = true
 
 include_dir = "0.7.4"
 axum = "0.8.4"

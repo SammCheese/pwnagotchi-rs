@@ -2,100 +2,119 @@
 
 use std::{collections::HashMap, sync::Arc};
 
-use parking_lot::Mutex;
+use anyhow::Result;
+use parking_lot::{Mutex, RwLock};
 use pwnagotchi_shared::{
-  config::config, identity::Identity, logger::LOGGER, mesh::peer::Peer,
-  models::grid::Advertisement, sessions::manager::SessionManager, traits::ui::ViewTrait,
-  types::ui::StateValue, utils::general::total_unique_handshakes,
+  config::config,
+  identity::Identity,
+  logger::LOGGER,
+  mesh::peer::Peer,
+  models::grid::Advertisement,
+  sessions::manager::SessionManager,
+  traits::{
+    epoch::Epoch,
+    general::{AdvertiserTrait, Component, CoreModule, CoreModules, Dependencies},
+    ui::ViewTrait,
+  },
+  utils::general::total_unique_handshakes,
 };
+use tokio::{sync::Mutex as AsyncMutex, task::JoinHandle};
 
-use crate::{
-  ai::Epoch,
-  grid::{advertise, peers, set_advertisement_data},
-};
+use crate::grid::{advertise, peers, set_advertisement_data};
+
+pub struct AdvertiserComponent {
+  advertiser: Option<Arc<AsyncMutex<dyn AdvertiserTrait + Send + Sync>>>,
+}
+
+impl Dependencies for AdvertiserComponent {
+  fn name(&self) -> &'static str {
+    "AdvertiserComponent"
+  }
+
+  fn dependencies(&self) -> &[&str] {
+    &[
+      "Identity",
+      "View",
+      "Epoch",
+      "SessionManager",
+    ]
+  }
+}
+
+#[async_trait::async_trait]
+impl Component for AdvertiserComponent {
+  async fn init(&mut self, _ctx: &CoreModules) -> Result<()> {
+    Ok(())
+  }
+
+  async fn start(&self) -> Result<Option<JoinHandle<()>>> {
+    if let Some(ad) = &self.advertiser {
+      let advertiser = Arc::clone(ad);
+      advertiser.lock().await.start_advertising().await;
+      let advertiser = Arc::clone(ad);
+      let handle = tokio::spawn(async move { advertiser.lock().await.peer_poller().await });
+      return Ok(Some(handle));
+    }
+    Ok(None)
+  }
+}
+
+impl Default for AdvertiserComponent {
+  fn default() -> Self {
+    Self::new()
+  }
+}
+
+impl AdvertiserComponent {
+  pub const fn new() -> Self {
+    Self { advertiser: None }
+  }
+}
 
 pub struct AsyncAdvertiser {
-  pub epoch: Arc<Mutex<Epoch>>,
-  pub advertisement: Advertisement,
-  pub view: Option<Arc<dyn ViewTrait>>,
+  pub epoch: Arc<RwLock<Epoch>>,
+  pub advertisement: Arc<Mutex<Advertisement>>,
+  pub sm: Arc<SessionManager>,
+  pub view: Arc<dyn ViewTrait + Send + Sync>,
   pub peers: HashMap<String, Peer>,
   pub closest_peer: Option<String>,
 }
 
-impl AsyncAdvertiser {
-  pub fn new(
-    epoch: Arc<Mutex<Epoch>>,
-    identity: &Identity,
-    view: Option<Arc<dyn ViewTrait>>,
-  ) -> Self {
-    let advertisement = Advertisement {
-      name: config().main.name.to_string(),
-      version: env!("CARGO_PKG_VERSION").to_string(),
-      identity: identity.fingerprint().to_string(),
-      face: config().faces.friend.to_string(),
-      pwnd_run: 0,
-      pwnd_total: 0,
-      uptime: 0,
-      epoch: 0,
-      policy: config().personality.clone(),
-    };
-
-    Self {
-      epoch,
-      view,
-      advertisement,
-      peers: HashMap::new(),
-      closest_peer: None,
-    }
+impl CoreModule for AsyncAdvertiser {
+  fn name(&self) -> &'static str {
+    "AsyncAdvertiser"
   }
 
-  pub fn fingerprint(&self) -> &str {
-    &self.advertisement.identity
+  fn dependencies(&self) -> &[&'static str] {
+    &[
+      "Identity",
+      "View",
+      "Epoch",
+      "SessionManager",
+    ]
   }
+}
 
-  #[allow(dead_code)]
-  async fn update_advertisement(&mut self, sm: &Arc<SessionManager>) {
-    self.advertisement.pwnd_run = sm.get_session().await.state.read().handshakes.len() as u32;
-    self.advertisement.pwnd_total = total_unique_handshakes(&config().bettercap.handshakes) as u32;
-    self.advertisement.uptime = 0;
-    self.advertisement.epoch = self.epoch.lock().epoch as u32;
-    set_advertisement_data(serde_json::to_value(self.advertisement.clone()).unwrap()).await;
-  }
-
-  fn on_face_change(&mut self, _old: StateValue, new: StateValue) {
-    let StateValue::Text(new) = new else {
+#[async_trait::async_trait]
+impl AdvertiserTrait for AsyncAdvertiser {
+  async fn start_advertising(&self) {
+    if !config().personality.advertise {
       return;
-    };
-
-    if let Some(face_str) = Some(new) {
-      self.advertisement.face = face_str;
     }
+    let ad = Arc::clone(&self.advertisement);
+    set_advertisement_data(serde_json::to_value(&*ad.lock()).unwrap_or_default());
+    advertise(Some(true));
 
-    tokio::task::spawn({
-      let advertisement = self.advertisement.clone();
-      async move {
-        set_advertisement_data(serde_json::to_value(advertisement).unwrap_or_default()).await;
-      }
-    });
+    let clone = Arc::clone(&ad);
+    self.view.on_state_change(
+      "face",
+      Box::new(move |old: String, new: String| {
+        on_face_change(Arc::clone(&clone), old.clone(), new.clone())
+      }),
+    );
   }
 
-  pub fn cumulative_encounters(&self) -> u32 {
-    self.peers.values().map(|p| p.encounters).sum()
-  }
-
-  fn on_new_peer(&self, peer: &Peer) {
-    if let Some(view) = &self.view {
-      view.on_new_peer(peer);
-    }
-  }
-
-  fn on_lost_peer(&self, peer: &Peer) {
-    if let Some(view) = &self.view {
-      view.on_lost_peer(peer);
-    }
-  }
-
-  pub async fn advertisement_poller(&mut self) {
+  async fn peer_poller(&mut self) {
     tokio::time::sleep(std::time::Duration::from_secs(20)).await;
     loop {
       LOGGER.log_debug("GRID", "Polling pwngrid-peer for peers...");
@@ -145,19 +164,84 @@ impl AsyncAdvertiser {
   }
 }
 
-pub async fn start_advertising(
-  advertiser: &Arc<Mutex<AsyncAdvertiser>>,
-  _sm: &Arc<SessionManager>,
-  view: &Arc<dyn ViewTrait + Send + Sync>,
-) {
-  if config().personality.advertise {
-    let value = advertiser.lock().advertisement.clone();
-    set_advertisement_data(serde_json::to_value(value).unwrap_or_default()).await;
-    advertise(Some(true)).await;
-    let advertiser_clone = Arc::clone(advertiser);
-    view.on_state_change(
-      "face",
-      Box::new(move |old, new| advertiser_clone.lock().on_face_change(old, new)),
-    );
+impl AsyncAdvertiser {
+  pub fn new(
+    identity: Arc<RwLock<Identity>>,
+    epoch: Arc<RwLock<Epoch>>,
+    view: Arc<dyn ViewTrait + Send + Sync>,
+    sm: Arc<SessionManager>,
+  ) -> Self {
+    let epoch_data = Arc::clone(&epoch);
+
+    let (epoch_num, epoch_handshakes) = {
+      let e = epoch_data.read();
+      (e.epoch as u32, e.num_handshakes)
+    };
+
+    let advertisement = Advertisement {
+      name: config().main.name.to_string(),
+      version: env!("CARGO_PKG_VERSION").to_string(),
+      identity: identity.read().fingerprint().to_string(),
+      face: config().faces.friend.to_string(),
+      pwnd_run: epoch_handshakes,
+      pwnd_total: 0,
+      uptime: 0,
+      epoch: epoch_num,
+      policy: config().personality.clone(),
+    };
+    let adv_lock = Arc::new(Mutex::new(advertisement));
+
+    Self {
+      epoch,
+      view,
+      advertisement: adv_lock,
+      sm,
+      peers: HashMap::new(),
+      closest_peer: None,
+    }
   }
+
+  pub fn fingerprint(&self) -> String {
+    self.advertisement.lock().identity.clone()
+  }
+
+  #[allow(dead_code)]
+  async fn update_advertisement(&mut self) {
+    let session = self.sm.get_session();
+    let ad_arc = Arc::clone(&self.advertisement);
+    let mut ad_mut = ad_arc.lock();
+    ad_mut.pwnd_run = session.read().state.handshakes.len() as u32;
+    ad_mut.pwnd_total = total_unique_handshakes(&config().bettercap.handshakes) as u32;
+    ad_mut.uptime = 0;
+    ad_mut.epoch = self.epoch.read().epoch as u32;
+
+    drop(ad_mut);
+
+    let advertisement = Arc::clone(&self.advertisement);
+
+    let ad = advertisement.lock();
+    set_advertisement_data(serde_json::to_value(&*ad).unwrap_or_default());
+  }
+
+  pub fn cumulative_encounters(&self) -> u32 {
+    self.peers.values().map(|p| p.encounters).sum()
+  }
+
+  fn on_new_peer(&self, peer: &Peer) {
+    self.view.on_new_peer(peer);
+  }
+
+  fn on_lost_peer(&self, peer: &Peer) {
+    self.view.on_lost_peer(peer);
+  }
+}
+
+fn on_face_change(ad: Arc<Mutex<Advertisement>>, _old: String, new: String) {
+  let ad = Arc::clone(&ad);
+  let mut ad_mut = ad.lock();
+  ad_mut.face = new.clone();
+  drop(ad_mut);
+
+  let advertisement = Arc::clone(&ad);
+  set_advertisement_data(serde_json::to_value(&*advertisement.lock()).unwrap_or_default());
 }

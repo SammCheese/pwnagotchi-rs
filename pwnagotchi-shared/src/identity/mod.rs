@@ -1,9 +1,12 @@
 use std::{
   path::{self, Path},
   process::{Command, exit},
+  sync::Arc,
 };
 
+use anyhow::{Result, anyhow};
 use base64::{Engine, engine::general_purpose};
+use parking_lot::RwLock;
 use rsa::{
   Pss, RsaPrivateKey, RsaPublicKey,
   pkcs1::{DecodeRsaPrivateKey, EncodeRsaPublicKey},
@@ -12,9 +15,55 @@ use rsa::{
   traits::SignatureScheme,
 };
 use sha2::{Digest, Sha256};
+use tokio::task::JoinHandle;
 
-use crate::{config::config, logger::LOGGER};
+use crate::{
+  config::config,
+  logger::LOGGER,
+  traits::general::{Component, CoreModule, CoreModules, Dependencies},
+};
 
+pub struct IdentityComponent {
+  identity: Option<Arc<RwLock<Identity>>>,
+}
+
+impl Default for IdentityComponent {
+  fn default() -> Self {
+    Self::new()
+  }
+}
+
+impl IdentityComponent {
+  pub const fn new() -> Self {
+    Self { identity: None }
+  }
+}
+
+impl Dependencies for IdentityComponent {
+  fn name(&self) -> &'static str {
+    "IdentityComponent"
+  }
+
+  fn dependencies(&self) -> &[&str] {
+    &["Identity"]
+  }
+}
+
+#[async_trait::async_trait]
+impl Component for IdentityComponent {
+  async fn init(&mut self, ctx: &CoreModules) -> Result<()> {
+    let ident = Arc::clone(&ctx.identity);
+    ident.write().initialize();
+    self.identity = Some(ident);
+    Ok(())
+  }
+
+  async fn start(&self) -> Result<Option<JoinHandle<()>>> {
+    if let Some(_id) = &self.identity { Ok(None) } else { Err(anyhow!("identity not initialized")) }
+  }
+}
+
+#[derive(Clone)]
 pub struct Identity {
   pub path: String,
   priv_path: String,
@@ -33,6 +82,12 @@ impl Default for Identity {
   }
 }
 
+impl CoreModule for Identity {
+  fn name(&self) -> &'static str {
+    "Identity"
+  }
+}
+
 impl Identity {
   pub fn new() -> Self {
     // Ensure we handle handle paths consistently
@@ -40,8 +95,7 @@ impl Identity {
     let priv_path = format!("{path}/id_rsa");
     let pub_path = format!("{priv_path}.pub");
     let fingerprint_path = format!("{path}/fingerprint");
-
-    let mut ident = Self {
+    Self {
       path,
       priv_path,
       priv_key: None,
@@ -50,10 +104,7 @@ impl Identity {
       fingerprint_path,
       pubkey_pem_b64: None,
       fingerprint: None,
-    };
-
-    ident.initialize();
-    ident
+    }
   }
 
   pub fn initialize(&mut self) {

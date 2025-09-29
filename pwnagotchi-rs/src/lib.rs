@@ -19,3 +19,7 @@
 #![allow(clippy::must_use_candidate)]
 // Cant do much about that
 #![allow(clippy::multiple_crate_versions)]
+
+pub mod components {
+  pub mod manager;
+}

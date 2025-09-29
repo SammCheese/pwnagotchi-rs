@@ -1,34 +1,44 @@
 use std::sync::Arc;
 
-use tokio::sync::{RwLock, broadcast};
+use parking_lot::RwLock;
+use tokio::sync::broadcast;
 
 use crate::{
   sessions::{lastsession::LastSession, session::Session},
-  traits::ui::ViewTrait,
+  traits::general::CoreModule,
 };
 
-#[derive(Clone)]
+impl CoreModule for SessionManager {
+  fn name(&self) -> &'static str {
+    "SessionManager"
+  }
+}
+
 pub struct SessionManager {
-  current: Arc<RwLock<Arc<Session>>>,
-  last: Arc<RwLock<Option<Arc<LastSession>>>>,
+  current: Arc<RwLock<Session>>,
+  last: Arc<RwLock<LastSession>>,
   notifier: broadcast::Sender<()>,
 }
 
+impl Default for SessionManager {
+  fn default() -> Self {
+    Self::new()
+  }
+}
+
 impl SessionManager {
-  pub fn new(view: &Arc<dyn ViewTrait + Send + Sync>) -> Self {
+  pub fn new() -> Self {
     let (tx, _rx) = broadcast::channel(16);
-    Self {
-      // What the fuck
-      current: Arc::new(RwLock::new(Arc::new(Session::new()))),
-      last: Arc::new(RwLock::new(Some(Arc::new(LastSession::new(view))))),
-      notifier: tx,
-    }
+    let current = Arc::new(RwLock::new(Session::new()));
+    let last = Arc::new(RwLock::new(LastSession::new()));
+
+    Self { current, last, notifier: tx }
   }
 
-  pub async fn set_session(&self, new_session: Session) {
+  pub fn set_session(&self, new_session: Session) {
     {
-      let mut current = self.current.write().await;
-      *current = Arc::new(new_session);
+      let mut current = self.current.write();
+      *current = new_session;
     }
     let _ = self.notifier.send(());
   }
@@ -38,12 +48,12 @@ impl SessionManager {
   //  *ls = last.map(Arc::new);
   //}
 
-  pub async fn get_last_session(&self) -> Option<Arc<LastSession>> {
-    self.last.read().await.clone()
+  pub fn get_last_session(&self) -> Arc<RwLock<LastSession>> {
+    Arc::clone(&self.last)
   }
 
-  pub async fn get_session(&self) -> Arc<Session> {
-    self.current.read().await.clone()
+  pub fn get_session(&self) -> Arc<RwLock<Session>> {
+    Arc::clone(&self.current)
   }
 
   pub fn subscribe(&self) -> broadcast::Receiver<()> {

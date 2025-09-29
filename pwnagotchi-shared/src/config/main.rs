@@ -16,7 +16,7 @@ pub struct MainConfig {
   pub whitelist: Vec<Cow<'static, str>>,
   //confd
   //custom_plugin_repos
-  //custom plugins
+  pub plugins_path: Option<Cow<'static, str>>,
 }
 
 impl Default for MainConfig {
@@ -31,6 +31,7 @@ impl Default for MainConfig {
       mon_stop_cmd: "/usr/bin/monstop".into(),
       mon_max_blind_epochs: 5,
       no_restart: false,
+      plugins_path: None,
     }
   }
 }

@@ -1,40 +1,85 @@
 use std::sync::Arc;
 
-use parking_lot::Mutex;
+use anyhow::Result;
+use parking_lot::RwLock;
 use pwnagotchi_shared::{
   config::config,
   logger::LOGGER,
   models::net::AccessPoint,
-  traits::{automata::AgentObserver, ui::ViewTrait},
+  traits::{
+    automata::AutomataTrait,
+    epoch::Epoch,
+    general::{Component, CoreModule, CoreModules, Dependencies},
+    ui::ViewTrait,
+  },
   types::epoch::Activity,
+  utils::general::has_support_network_for,
 };
+use tokio::task::JoinHandle;
 
-use crate::ai::Epoch;
+pub struct AutomataComponent {}
 
-pub struct Automata {
-  pub epoch: Arc<Mutex<Epoch>>,
-  pub view: Arc<dyn ViewTrait + Send + Sync>,
-}
-
-impl Automata {
-  pub const fn new(epoch: Arc<Mutex<Epoch>>, view: Arc<dyn ViewTrait + Send + Sync>) -> Self {
-    Self { epoch, view }
+impl Dependencies for AutomataComponent {
+  fn name(&self) -> &'static str {
+    "AutomataComponent"
   }
 
-  pub fn clone_as_trait(&self) -> Arc<dyn AgentObserver + Send + Sync> {
-    Arc::new(Automata {
-      epoch: Arc::clone(&self.epoch),
-      view: Arc::clone(&self.view),
-    })
+  fn dependencies(&self) -> &[&str] {
+    &["Epoch", "View"]
   }
 }
 
 #[async_trait::async_trait]
-impl AgentObserver for Automata {
+impl Component for AutomataComponent {
+  async fn init(&mut self, _ctx: &CoreModules) -> Result<()> {
+    Ok(())
+  }
+
+  async fn start(&self) -> Result<Option<JoinHandle<()>>> {
+    LOGGER.log_info("Personality", "Starting Automata component");
+    Ok(None)
+  }
+}
+
+impl Default for AutomataComponent {
+  fn default() -> Self {
+    Self::new()
+  }
+}
+
+impl AutomataComponent {
+  pub const fn new() -> Self {
+    Self {}
+  }
+}
+
+impl CoreModule for Automata {
+  fn name(&self) -> &'static str {
+    "Automata"
+  }
+
+  fn dependencies(&self) -> &[&'static str] {
+    &["Epoch", "View"]
+  }
+}
+
+pub struct Automata {
+  pub epoch: Arc<RwLock<Epoch>>,
+  pub view: Arc<dyn ViewTrait + Send + Sync>,
+}
+
+impl Automata {
+  pub const fn new(epoch: Arc<RwLock<Epoch>>, view: Arc<dyn ViewTrait + Send + Sync>) -> Self {
+    Self { epoch, view }
+  }
+}
+
+#[async_trait::async_trait]
+impl AutomataTrait for Automata {
   fn on_miss(&self, who: &AccessPoint) {
     LOGGER.log_info("Personality", "Missed an interaction :(");
     self.view.on_miss(who);
-    self.epoch.lock().track(Activity::Miss, None);
+    self.epoch.write().track(Activity::Miss, None);
   }
 
   fn on_error(&self, who: &AccessPoint, error: &str) {
@@ -57,7 +102,7 @@ impl AgentObserver for Automata {
   }
 
   fn in_good_mood(&self) -> bool {
-    self.has_support_network_for(1.0)
+    has_support_network_for(1.0, &self.epoch)
   }
 
   fn set_grateful(&self) {
@@ -66,7 +111,7 @@ impl AgentObserver for Automata {
   }
 
   fn set_lonely(&self) {
-    if self.has_support_network_for(1.0) {
+    if has_support_network_for(1.0, &self.epoch) {
       LOGGER.log_info("Personality", "Unit is grateful instead of lonely");
       self.set_grateful();
     } else {
@@ -77,9 +122,9 @@ impl AgentObserver for Automata {
 
   fn set_bored(&self) {
     let factor =
-      f64::from(self.epoch.lock().inactive_for) / f64::from(config().personality.bored_num_epochs);
+      f64::from(self.epoch.read().inactive_for) / f64::from(config().personality.bored_num_epochs);
     #[allow(clippy::cast_possible_truncation)]
-    if self.has_support_network_for(factor as f32) {
+    if has_support_network_for(factor as f32, &self.epoch) {
       LOGGER.log_info("Personality", "Unit is grateful instead of bored");
       self.set_grateful();
     } else {
@@ -90,30 +135,30 @@ impl AgentObserver for Automata {
 
   fn set_sad(&self) {
     let factor =
-      f64::from(self.epoch.lock().inactive_for) / f64::from(config().personality.sad_num_epochs);
+      f64::from(self.epoch.read().inactive_for) / f64::from(config().personality.sad_num_epochs);
 
     #[allow(clippy::cast_possible_truncation)]
-    if self.has_support_network_for(factor as f32) {
+    if has_support_network_for(factor as f32, &self.epoch) {
       LOGGER.log_info("Personality", "Unit is grateful instead of sad");
       self.set_grateful();
     } else {
       self.view.on_sad();
       LOGGER.log_warning(
         "Personality",
-        format!("{} epochs with no activity -> sad", self.epoch.lock().inactive_for).as_str(),
+        format!("{} epochs with no activity -> sad", self.epoch.read().inactive_for).as_str(),
       );
     }
   }
 
   fn set_angry(&self, factor: f32) {
-    if self.has_support_network_for(factor) {
+    if has_support_network_for(factor, &self.epoch) {
       LOGGER.log_info("Personality", "Unit is grateful instead of angry");
       self.set_grateful();
     } else {
       self.view.on_angry();
       LOGGER.log_warning(
         "Personality",
-        format!("{} epochs with no activity -> angry", self.epoch.lock().inactive_for).as_str(),
+        format!("{} epochs with no activity -> angry", self.epoch.read().inactive_for).as_str(),
       );
     }
   }
@@ -121,50 +166,37 @@ impl AgentObserver for Automata {
   fn set_excited(&self) {
     LOGGER.log_info(
       "Personality",
-      format!("{} epochs with activity -> excited", self.epoch.lock().active_for).as_str(),
+      format!("{} epochs with activity -> excited", self.epoch.read().active_for).as_str(),
     );
     self.view.on_excited();
   }
 
   async fn wait_for(&self, duration: u32, sleeping: Option<bool>) {
     let sleeping = sleeping.unwrap_or(true);
-    {
-      self.epoch.lock().track(Activity::Sleep, Some(duration));
-    }
-    self.view.wait(duration.into(), sleeping, &self.clone_as_trait()).await;
+    self.epoch.write().track(Activity::Sleep, Some(duration));
+    self.view.wait(duration.into(), sleeping).await;
   }
 
   fn is_stale(&self) -> bool {
-    self.epoch.lock().num_missed > config().personality.max_misses_for_recon
+    self.epoch.read().num_missed > config().personality.max_misses_for_recon
   }
 
   fn any_activity(&self) -> bool {
-    self.epoch.lock().any_activity
+    self.epoch.read().any_activity
   }
 
   fn next_epoch(&self) {
     let was_stale = self.is_stale();
+    let epoch_num = self.epoch.read().epoch;
 
-    let (_epoch_num, did_miss, sad_for, bored_for, active_for, blind_for, was_stale) = {
-      let mut epoch = self.epoch.lock();
+    LOGGER
+      .log_info("Epoch", &format!("Advancing to next epoch {} -> {}", epoch_num, epoch_num + 1));
 
-      LOGGER.log_info(
-        "Epoch",
-        &format!("Advancing to next epoch {} -> {}", epoch.epoch, epoch.epoch + 1),
-      );
+    self.epoch.write().next();
 
-      let did_miss = epoch.num_missed;
-      epoch.next();
-
-      (
-        epoch.epoch,
-        did_miss,
-        epoch.sad_for,
-        epoch.bored_for,
-        epoch.active_for,
-        epoch.blind_for,
-        was_stale,
-      )
+    let (did_miss, sad_for, bored_for, active_for, blind_for, was_stale) = {
+      let e = self.epoch.read();
+      (e.num_missed, e.sad_for, e.bored_for, e.active_for, e.blind_for, was_stale)
     };
 
     if was_stale {
@@ -196,7 +228,7 @@ impl AgentObserver for Automata {
       self.set_bored();
     } else if active_for >= config().personality.excited_num_epochs {
       self.set_excited();
-    } else if active_for >= 5 && self.has_support_network_for(5.0) {
+    } else if active_for >= 5 && has_support_network_for(5.0, &self.epoch) {
       self.set_grateful();
     }
 
@@ -208,14 +240,7 @@ impl AgentObserver for Automata {
       );
 
       //self.restart();
-      self.epoch.lock().blind_for = 0;
+      self.epoch.write().blind_for = 0;
     }
-  }
-
-  fn has_support_network_for(&self, factor: f32) -> bool {
-    let bond_factor = f64::from(config().personality.bond_encounters_factor);
-    let total_encounters = f64::from(self.epoch.lock().num_peers);
-
-    total_encounters > 0.0 && (bond_factor / total_encounters) >= factor.into()
   }
 }

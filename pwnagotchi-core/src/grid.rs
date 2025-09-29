@@ -65,12 +65,12 @@ where
   }
 }
 
-pub async fn advertise(enabled: Option<bool>) -> Option<serde_json::Value> {
+pub fn advertise(enabled: Option<bool>) -> Option<serde_json::Value> {
   let enabled = enabled.unwrap_or(true);
   call(&format!("mesh/{enabled}"), &serde_json::Value::Null)
 }
 
-pub async fn set_advertisement_data(data: serde_json::Value) -> Option<serde_json::Value> {
+pub fn set_advertisement_data(data: serde_json::Value) -> Option<serde_json::Value> {
   call("mesh/data", &data)
 }
 

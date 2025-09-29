@@ -1,5 +1,6 @@
 use std::{borrow::Cow, sync::Arc};
 
+use anyhow::Result;
 use axum::{
   Router,
   body::Body,
@@ -11,10 +12,18 @@ use axum::{
 };
 use axum_auth::AuthBasic;
 use include_dir::{Dir, include_dir};
+use parking_lot::RwLock;
 use pwnagotchi_shared::{
-  config::config, identity::Identity, logger::LOGGER, sessions::manager::SessionManager,
+  config::config,
+  identity::Identity,
+  logger::LOGGER,
+  sessions::manager::SessionManager,
+  traits::{
+    general::{Component, CoreModules, Dependencies},
+    ui::ServerTrait,
+  },
 };
-use tokio::sync::oneshot;
+use tokio::{sync::oneshot, task::JoinHandle};
 
 use crate::web::pages::handler::{
   inbox_handler, index_handler, message_handler, new_message_handler, peers_handler,
@@ -25,66 +34,126 @@ pub static TEMPLATE_ASSETS: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/assets/t
 pub static STATIC_ASSETS: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/assets/static");
 pub static FONT_ASSETS: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/assets/fonts");
 
-pub struct Server {
-  pub address: Cow<'static, str>,
-  pub port: u16,
-  shutdown_tx: Option<oneshot::Sender<()>>,
+pub struct ServerComponent {
+  server: Option<Arc<dyn ServerTrait + Send + Sync>>,
 }
 
-impl Default for Server {
+impl Dependencies for ServerComponent {
+  fn name(&self) -> &'static str {
+    "WebUIComponent"
+  }
+
+  fn dependencies(&self) -> &[&str] {
+    &["SessionManager", "Identity"]
+  }
+}
+
+#[async_trait::async_trait]
+impl Component for ServerComponent {
+  async fn init(&mut self, ctx: &CoreModules) -> Result<()> {
+    let (sm, identity) = (&ctx.session_manager, &ctx.identity);
+    let sm = Arc::clone(sm);
+    let identity = Arc::clone(identity);
+    self.server = Some(Arc::new(Server::new(sm, identity)));
+    Ok(())
+  }
+
+  async fn start(&self) -> Result<Option<JoinHandle<()>>> {
+    if let Some(server) = &self.server {
+      let server = Arc::clone(server);
+      let handle = tokio::spawn(async move {
+        server.start_server().await.unwrap_or_else(|e| {
+          LOGGER.log_error("Server", &format!("Failed to start server: {e}"));
+        });
+      });
+      return Ok(Some(handle));
+    }
+    Ok(None)
+  }
+}
+
+impl Dependencies for Server {
+  fn name(&self) -> &'static str {
+    "WebUI"
+  }
+
+  fn dependencies(&self) -> &[&str] {
+    &["SessionManager", "Identity"]
+  }
+}
+
+impl Default for ServerComponent {
   fn default() -> Self {
     Self::new()
   }
 }
 
-impl Server {
+impl ServerComponent {
   #[must_use]
   pub fn new() -> Self {
+    Self { server: None }
+  }
+}
+
+#[derive(Clone)]
+#[allow(dead_code)]
+pub struct WebUIState {
+  pub sm: Arc<SessionManager>,
+  pub identity: Arc<RwLock<Identity>>,
+}
+
+pub struct Server {
+  pub sm: Arc<SessionManager>,
+  pub identity: Arc<RwLock<Identity>>,
+  pub address: Cow<'static, str>,
+  pub port: u16,
+  #[allow(dead_code)]
+  shutdown_tx: Option<oneshot::Sender<()>>,
+}
+
+#[async_trait::async_trait]
+impl ServerTrait for Server {
+  async fn start_server(&self) -> Result<(), String> {
+    if self.address.is_empty() {
+      LOGGER.log_info("Server", "Couldn't get IP of USB0, video server not starting");
+      return Err("Couldn't get IP of USB0, video server not starting".into());
+    }
+
+    let sm = Arc::clone(&self.sm);
+    let identity = Arc::clone(&self.identity);
+
+    let app = build_router(sm, identity);
+
+    let addr = format!("{}:{}", self.address, self.port);
+
+    tokio::spawn(async move {
+      match tokio::net::TcpListener::bind(&addr).await {
+        Ok(listener) => {
+          if let Err(e) = axum::serve(listener, app).await {
+            LOGGER.log_error("Server", &format!("Failed to serve: {e}"));
+          }
+        }
+        Err(e) => {
+          LOGGER.log_error("Server", &format!("Failed to bind to {addr}: {e}"));
+        }
+      }
+    });
+    Ok(())
+  }
+
+  async fn stop_server(&self) {}
+}
+
+impl Server {
+  #[must_use]
+  pub fn new(sm: Arc<SessionManager>, identity: Arc<RwLock<Identity>>) -> Self {
     let cfg = &config().ui.web;
     Self {
+      sm,
+      identity,
       address: cfg.address.clone(),
       port: cfg.port,
       shutdown_tx: None,
-    }
-  }
-  /// Starts the server.
-  ///
-  /// # Panics
-  ///
-  /// This function will panic if it fails to bind to address.
-  pub fn start(&mut self, sm: &Arc<SessionManager>, identity: &Arc<Identity>) {
-    if self.address.is_empty() {
-      LOGGER.log_info("Server", "Couldn't get IP of USB0, video server not starting");
-    } else {
-      let addr = format!("{}:{}", self.address, self.port);
-
-      let (shutdown_tx, shutdown_rx) = oneshot::channel();
-      self.shutdown_tx = Some(shutdown_tx);
-
-      let sm = Arc::clone(sm);
-      let identity = Arc::clone(identity);
-
-      tokio::spawn(async move {
-        let app = build_router(sm, identity);
-
-        match tokio::net::TcpListener::bind(&addr).await {
-          Ok(listener) => {
-            if let Err(e) = axum::serve(listener, app).await {
-              LOGGER.log_error("Server", &format!("Failed to serve: {e}"));
-              shutdown_rx.await.ok();
-            }
-          }
-          Err(e) => {
-            LOGGER.log_error("Server", &format!("Failed to bind to {addr}: {e}"));
-          }
-        }
-      });
-    }
-  }
-
-  pub fn stop(&mut self) {
-    if let Some(tx) = self.shutdown_tx.take() {
-      let _ = tx.send(());
     }
   }
 }
@@ -124,7 +193,8 @@ fn compare_safely(a: &str, b: &str) -> bool {
   diff == 0
 }
 
-pub fn build_router(sm: Arc<SessionManager>, identity: Arc<Identity>) -> Router {
+pub fn build_router(sm: Arc<SessionManager>, identity: Arc<RwLock<Identity>>) -> Router {
+  let state = Arc::new(WebUIState { sm, identity });
   Router::new()
     .layer(middleware::from_fn(basic_auth_middleware))
     // Template routes
@@ -149,7 +219,7 @@ pub fn build_router(sm: Arc<SessionManager>, identity: Arc<Identity>) -> Router 
     .route("/message", get(message_handler))
     // Static
     .route("/{*path}", get(static_handler))
-    .with_state((sm, identity))
+    .with_state(state)
 }
 
 pub async fn static_handler(Path(path): Path<String>) -> Response {

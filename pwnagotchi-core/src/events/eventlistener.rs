@@ -1,26 +1,106 @@
 use std::{fmt::Write, sync::Arc};
 
+use anyhow::Result;
+use parking_lot::RwLock;
 use pwnagotchi_shared::{
   config::config,
   logger::LOGGER,
   models::net::Handshake,
   sessions::manager::SessionManager,
-  traits::ui::ViewTrait,
-  types::{epoch::Activity, ui::StateValue},
+  traits::{
+    bettercap::{BettercapCommand, BettercapTrait},
+    epoch::Epoch,
+    general::{Component, CoreModules, Dependencies},
+    ui::ViewTrait,
+  },
+  types::epoch::Activity,
   utils::general::{hostname_or_mac, total_unique_handshakes},
 };
 use serde_json::Value;
-use tokio::sync::mpsc;
+use tokio::{sync::mpsc, task::JoinHandle};
 
-use crate::{
-  agent::find_ap_sta_in_session, ai::Epoch, bettercap::BettercapCommand,
-  traits::bettercapcontroller::BettercapController,
-};
+use crate::agent::find_ap_sta_in_session;
+
+pub struct EventListenerComponent {
+  eventlistener: Option<Arc<EventListener>>,
+}
+
+impl Default for EventListenerComponent {
+  fn default() -> Self {
+    Self::new()
+  }
+}
+
+impl EventListenerComponent {
+  pub fn new() -> Self {
+    Self { eventlistener: None }
+  }
+}
+
+impl Dependencies for EventListenerComponent {
+  fn name(&self) -> &'static str {
+    "EventListenerComponent"
+  }
+
+  fn dependencies(&self) -> &[&str] {
+    &[
+      "Bettercap",
+      "SessionManager",
+      "Epoch",
+      "View",
+    ]
+  }
+}
+
+#[async_trait::async_trait]
+impl Component for EventListenerComponent {
+  async fn init(&mut self, ctx: &CoreModules) -> Result<()> {
+    let (bc, sm, epoch, view) = (&ctx.bettercap, &ctx.session_manager, &ctx.epoch, &ctx.view);
+    let sm = Arc::clone(sm);
+    let epoch = Arc::clone(epoch);
+    let bettercap = Arc::clone(bc);
+    let view = Arc::clone(view);
+    let eventlistener = EventListener::new(sm, bettercap, epoch, view);
+    self.eventlistener = Some(Arc::new(eventlistener));
+
+    Ok(())
+  }
+
+  async fn start(&self) -> Result<Option<JoinHandle<()>>> {
+    if let Some(ev) = &self.eventlistener {
+      LOGGER.log_info("Agent", "Starting EventListener component");
+      let ev = Arc::clone(ev);
+      let handle = tokio::spawn(async move {
+        start_event_loop(&ev.sm, &ev.bettercap, &ev.epoch, &ev.view).await;
+      });
+      return Ok(Some(handle));
+    }
+    Ok(None)
+  }
+}
+
+pub struct EventListener {
+  sm: Arc<SessionManager>,
+  bettercap: Arc<dyn BettercapTrait + Send + Sync>,
+  epoch: Arc<RwLock<Epoch>>,
+  view: Arc<dyn ViewTrait + Send + Sync>,
+}
+
+impl EventListener {
+  pub fn new(
+    sm: Arc<SessionManager>,
+    bettercap: Arc<dyn BettercapTrait + Send + Sync>,
+    epoch: Arc<RwLock<Epoch>>,
+    view: Arc<dyn ViewTrait + Send + Sync>,
+  ) -> Self {
+    Self { sm, bettercap, epoch, view }
+  }
+}
 
 pub async fn start_event_loop(
   sm: &Arc<SessionManager>,
-  bc: &Arc<dyn BettercapController>,
-  epoch: &Arc<parking_lot::Mutex<Epoch>>,
+  bc: &Arc<dyn BettercapTrait + Send + Sync>,
+  epoch: &Arc<RwLock<Epoch>>,
   view: &Arc<dyn ViewTrait + Send + Sync>,
 ) {
   LOGGER.log_info("Agent", "Starting event loop");
@@ -83,7 +163,7 @@ pub async fn handle_handshake_event(
   jmsg: &Value,
   sm: &Arc<SessionManager>,
   view: &Arc<dyn ViewTrait + Send + Sync>,
-  epoch: &Arc<parking_lot::Mutex<Epoch>>,
+  epoch: &Arc<RwLock<Epoch>>,
 ) {
   let data = jmsg.get("data");
   let ap_mac = data
@@ -103,10 +183,10 @@ pub async fn handle_handshake_event(
     .to_string();
   let key = format!("{sta_mac} -> {ap_mac} ");
 
-  let session = sm.get_session().await;
-  let mut state = session.state.write();
+  let session = sm.get_session();
+  let mut session_mut = session.write();
 
-  let entry = state.handshakes.entry(key.clone());
+  let entry = session_mut.state.handshakes.entry(key.clone());
   match entry {
     std::collections::hash_map::Entry::Occupied(_) => {
       LOGGER.log_debug("Agent", &format!("Handshake already exists for {sta_mac} -> {ap_mac}"));
@@ -120,9 +200,8 @@ pub async fn handle_handshake_event(
       });
     }
   }
-  drop(state);
+  drop(session_mut);
 
-  let state = session.state.read();
   let last_pwned_hostname = find_ap_sta_in_session(&session, &sta_mac, &ap_mac)
     .map(|(ap, sta)| {
       LOGGER.log_info(
@@ -141,21 +220,20 @@ pub async fn handle_handshake_event(
       hostname_or_mac(&ap).to_string()
     })
     .unwrap_or(ap_mac.clone());
-  drop(state);
 
-  let mut state = session.state.write();
-  state.last_pwned = Some(last_pwned_hostname.clone());
+  let mut session_mut = session.write();
+  session_mut.state.last_pwned = Some(last_pwned_hostname.clone());
 
   let total = total_unique_handshakes(&config().bettercap.handshakes);
-  let handshake_count = state.handshakes.len();
+  let handshake_count = session_mut.state.handshakes.len();
   let mut text = format!("{handshake_count} ({total:02})");
 
-  if let Some(last) = &state.last_pwned {
+  if let Some(last) = &session_mut.state.last_pwned {
     let _ = write!(text, " [{last}]");
   }
-  drop(state);
+  drop(session_mut);
 
-  epoch.lock().track(Activity::Handshake, Some(1));
-  view.set("shakes", StateValue::Text(text));
+  epoch.write().track(Activity::Handshake, Some(1));
+  view.set("shakes", text);
   view.on_handshakes(1);
 }

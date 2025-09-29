@@ -1,8 +1,14 @@
-use std::{fs, time::Duration};
+use std::{fs, sync::Arc, time::Duration};
 
-use crate::models::{
-  agent::RunningMode,
-  net::{AccessPoint, Station},
+use parking_lot::RwLock;
+
+use crate::{
+  config::config,
+  models::{
+    agent::RunningMode,
+    net::{AccessPoint, Station},
+  },
+  traits::epoch::Epoch,
 };
 
 pub fn total_unique_handshakes(handshakes_path: &str) -> u32 {
@@ -56,4 +62,11 @@ pub fn mode_to_str(mode: RunningMode) -> String {
     RunningMode::Auto => "AUTO".into(),
     RunningMode::Custom => "CUST".into(),
   }
+}
+
+pub fn has_support_network_for(factor: f32, epoch: &Arc<RwLock<Epoch>>) -> bool {
+  let bond_factor = f64::from(config().personality.bond_encounters_factor);
+  let total_encounters = epoch.read().num_peers as f64;
+
+  total_encounters > 0.0 && (bond_factor / total_encounters) >= factor.into()
 }

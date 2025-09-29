@@ -1,60 +1,133 @@
 use std::{sync::Arc, time::Duration};
 
+use anyhow::Result;
 use pwnagotchi_shared::{
-  logger::LOGGER, models::agent::RunningMode, sessions::manager::SessionManager,
-  traits::automata::AgentObserver,
+  logger::LOGGER,
+  models::agent::RunningMode,
+  sessions::manager::SessionManager,
+  traits::{
+    agent::AgentTrait,
+    automata::AutomataTrait,
+    bettercap::BettercapTrait,
+    general::{Component, CoreModules, Dependencies},
+  },
 };
-use tokio::time::sleep;
+use tokio::{task::JoinHandle, time::sleep};
 
-use crate::{agent::Agent, setup, traits::bettercapcontroller::BettercapController};
+pub struct CliComponent {
+  cli: Option<Arc<Cli>>,
+  manual: bool,
+}
 
-pub async fn do_auto_mode(
-  sm: &Arc<SessionManager>,
-  bc: &Arc<dyn BettercapController>,
-  agent: &Arc<Agent>,
-  observer: &Arc<dyn AgentObserver + Send + Sync>,
-) {
-  LOGGER.log_info("Pwnagotchi", "Starting auto mode...");
-
-  // Set mode and perform internal setup
-  agent.set_mode(sm, RunningMode::Auto).await;
-  setup::perform_bettercap_setup(bc).await;
-  agent.start();
-
-  loop {
-    agent.recon(sm).await;
-
-    let aps = agent.get_access_points_by_channel(sm).await;
-
-    for (ch, aps) in aps {
-      sleep(Duration::from_secs(1)).await;
-      agent.set_channel(sm, ch).await;
-
-      if !observer.is_stale() && observer.any_activity() {
-        LOGGER.log_info("Pwnagotchi", format!("{} APs on channel {ch}", aps.len()).as_str());
-      }
-
-      for ap in aps {
-        agent.associate(sm, &ap, None).await;
-
-        for sta in &ap.clients {
-          agent.deauth(sm, &ap, sta, None).await;
-          // Shoo Nexmon Bugs!
-          sleep(Duration::from_secs(1)).await;
-        }
-      }
-    }
-
-    observer.next_epoch();
+impl Dependencies for CliComponent {
+  fn name(&self) -> &'static str {
+    "CliComponent"
+  }
+  fn dependencies(&self) -> &[&str] {
+    &[
+      "SessionManager",
+      "Bettercap",
+      "Agent",
+      "Automata",
+    ]
   }
 }
 
-pub async fn do_manual_mode(sm: &Arc<SessionManager>, agent: &Arc<Agent>) {
-  LOGGER.log_info("Pwnagotchi", "Starting in manual mode...");
+#[async_trait::async_trait]
+impl Component for CliComponent {
+  async fn init(&mut self, ctx: &CoreModules) -> Result<()> {
+    let (sm, bc, agent, observer) =
+      (&ctx.session_manager, &ctx.bettercap, &ctx.agent, &ctx.automata);
 
-  agent.set_mode(sm, RunningMode::Manual).await;
+    let sm = Arc::clone(sm);
+    let bc = Arc::clone(bc);
+    let agent = Arc::clone(agent);
+    let observer = Arc::clone(observer);
 
-  loop {
-    sleep(Duration::from_secs(60)).await;
+    let cli = Cli::new(sm, bc, agent, observer, self.manual);
+
+    self.cli = Some(Arc::new(cli));
+
+    Ok(())
+  }
+
+  async fn start(&self) -> Result<Option<JoinHandle<()>>> {
+    if let Some(cli) = self.cli.as_ref() {
+      if cli.manual {
+        cli.do_manual_mode().await;
+      } else {
+        cli.do_auto_mode().await;
+      }
+    }
+    Ok(None)
+  }
+}
+
+impl CliComponent {
+  pub fn new(manual: bool) -> Self {
+    Self { cli: None, manual }
+  }
+}
+
+pub struct Cli {
+  pub sm: Arc<SessionManager>,
+  pub bc: Arc<dyn BettercapTrait + Send + Sync>,
+  pub agent: Arc<dyn AgentTrait + Send + Sync>,
+  pub observer: Arc<dyn AutomataTrait + Send + Sync>,
+  pub manual: bool,
+}
+
+impl Cli {
+  pub fn new(
+    sm: Arc<SessionManager>,
+    bc: Arc<dyn BettercapTrait + Send + Sync>,
+    agent: Arc<dyn AgentTrait + Send + Sync>,
+    observer: Arc<dyn AutomataTrait + Send + Sync>,
+    manual: bool,
+  ) -> Self {
+    Self { sm, bc, agent, observer, manual }
+  }
+
+  pub async fn do_auto_mode(&self) {
+    LOGGER.log_info("Pwnagotchi", "Starting auto mode...");
+
+    self.agent.set_mode(RunningMode::Auto).await;
+    self.agent.start_pwnagotchi();
+
+    loop {
+      self.agent.recon().await;
+
+      let aps = self.agent.get_access_points_by_channel().await;
+
+      for (ch, aps) in aps {
+        sleep(Duration::from_secs(1)).await;
+        self.agent.set_channel(ch).await;
+
+        if !self.observer.is_stale() && self.observer.any_activity() {
+          LOGGER.log_info("Pwnagotchi", format!("{} APs on channel {ch}", aps.len()).as_str());
+        }
+
+        for ap in aps {
+          self.agent.associate(&ap, None).await;
+
+          for sta in &ap.clients {
+            self.agent.deauth(&ap, sta, None).await;
+            // Shoo Nexmon Bugs!
+            sleep(Duration::from_secs(1)).await;
+          }
+        }
+      }
+
+      self.observer.next_epoch();
+    }
+  }
+
+  pub async fn do_manual_mode(&self) {
+    LOGGER.log_info("Pwnagotchi", "Starting in manual mode...");
+    self.agent.set_mode(RunningMode::Manual).await;
+
+    loop {
+      sleep(Duration::from_secs(60)).await;
+    }
   }
 }

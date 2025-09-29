@@ -1,5 +1,8 @@
+use std::sync::Arc;
+
 use askama::Template;
 use axum::{
+  extract::State,
   http::{StatusCode, header},
   response::{Html, IntoResponse, Response},
 };
@@ -11,6 +14,7 @@ use crate::web::{
     BaseCtx, InboxCtx, InboxTemplate, IndexTemplate, Message, MessageTemplate, NavItem,
     NewMessageTemplate, PeersTemplate, PluginsTemplate, ProfileTemplate, StatusTemplate,
   },
+  server::WebUIState,
 };
 
 pub async fn index_handler() -> impl IntoResponse {
@@ -59,11 +63,11 @@ pub async fn peers_handler() -> impl IntoResponse {
   }
 }
 
-pub async fn profile_handler() -> impl IntoResponse {
+pub async fn profile_handler(State(state): State<Arc<WebUIState>>) -> impl IntoResponse {
   let tpl = ProfileTemplate {
     base: make_base("Profile", "profile"),
     name: config().main.name.to_string(),
-    fingerprint: "XXXX".to_string(),
+    fingerprint: state.identity.read().fingerprint().to_string(),
     data: serde_json::json!({}),
   };
   match tpl.render() {
