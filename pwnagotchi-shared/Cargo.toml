@@ -29,6 +29,8 @@ base64.workspace = true
 png.workspace = true
 rgb.workspace = true
 tiny-skia.workspace = true
+inventory.workspace = true
+futures.workspace = true
 
 flate2 = "1.1.2"
 uuid = { version = "1.18.1", features = ["v4"] }

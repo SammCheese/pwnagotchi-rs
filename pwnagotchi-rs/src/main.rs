@@ -14,6 +14,7 @@ use pwnagotchi_core::{
   mesh::advertiser::AdvertiserComponent,
   setup::SetupComponent,
 };
+use pwnagotchi_plugins::managers::plugin_manager::PluginManager;
 use pwnagotchi_rs::components::manager::ComponentManager;
 use pwnagotchi_shared::{
   config::{config, init_config},
@@ -28,6 +29,7 @@ use pwnagotchi_shared::{
     general::{Component, CoreModules},
     ui::ViewTrait,
   },
+  types::hooks::HookDescriptor,
 };
 use pwnagotchi_ui::{
   ui::{
@@ -94,6 +96,11 @@ async fn main() -> anyhow::Result<()> {
     exit(EXIT_SUCCESS);
   }
 
+  let mut plugin_manager = PluginManager::new();
+
+  plugin_manager.init();
+  plugin_manager.load_plugins();
+
   let identity = Arc::new(RwLock::new(Identity::new()));
   let session_manager = Arc::new(SessionManager::new());
   let epoch = Arc::new(RwLock::new(Epoch::new()));
@@ -123,6 +130,16 @@ async fn main() -> anyhow::Result<()> {
     automata: Arc::clone(&automata),
   });
 
+  // Provide core modules to plugin manager so plugins can use them during
+  // initialization
+  plugin_manager.set_coremodules(Arc::clone(&core_modules));
+  plugin_manager.initialize_plugins();
+
+  // Debug: Print all inventory items
+  for hook in inventory::iter::<HookDescriptor>() {
+    println!("Registered hookable method: {}", hook.name);
+  }
+
   LOGGER.log_debug("Pwnagotchi", "Loading Components");
 
   let mut manager = ComponentManager::new(Arc::clone(&core_modules));
@@ -145,22 +162,22 @@ async fn main() -> anyhow::Result<()> {
   }
 
   if let Err(e) = manager.init_all().await {
-    eprintln!("Failed to initialize components: {}", e);
+    LOGGER.log_error("ComponentManager", &format!("Failed to initialize components: {e}"));
     exit(1);
   }
 
   if let Err(e) = manager.start_all().await {
-    eprintln!("Failed to start components: {}", e);
+    LOGGER.log_error("ComponentManager", &format!("Failed to start components: {e}"));
   }
 
   // Cli Routines have to go last ALWAYS
   let mut cli = CliComponent::new(cli.manual);
   if let Err(e) = cli.init(&Arc::clone(&core_modules)).await {
-    eprintln!("Failed to initialize CLI component: {}", e);
+    LOGGER.log_error("ComponentManager", &format!("Failed to initialize CLI component: {e}"));
     exit(1);
   }
   if let Err(e) = cli.start().await {
-    eprintln!("Failed to start CLI component: {}", e);
+    LOGGER.log_error("ComponentManager", &format!("Failed to start CLI component: {e}"));
     exit(1);
   }
 
@@ -168,7 +185,10 @@ async fn main() -> anyhow::Result<()> {
 
   LOGGER.log_info("Pwnagotchi", "Shutting down...");
 
+  let _ = plugin_manager.shutdown_all();
+
   manager.shutdown().await;
+
   Ok(())
 }
 

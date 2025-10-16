@@ -16,10 +16,12 @@ pwnagotchi-core = { path = "../pwnagotchi-core"}
 pwnagotchi-ui = { path = "../pwnagotchi-ui"}
 pwnagotchi-hw = { path = "../pwnagotchi-hw"}
 pwnagotchi-shared = { path = "../pwnagotchi-shared" }
+pwnagotchi-plugins = { path = "../pwnagotchi-plugins" }
 
 tokio.workspace = true
 parking_lot.workspace = true
 anyhow.workspace = true
+inventory.workspace = true
 
 clap = { version = "4.5.47", features = ["derive"] }
 clap_complete = "4.5.57"

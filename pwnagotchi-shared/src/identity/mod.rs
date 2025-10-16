@@ -1,6 +1,6 @@
 use std::{
   path::{self, Path},
-  process::{Command, exit},
+  process::Command,
   sync::Arc,
 };
 
@@ -115,8 +115,12 @@ impl Identity {
         "IDENTITY",
         &format!("Failed to create identity directory {:?}: {e}", &self.path),
       );
-
-      exit(1);
+      LOGGER.log_error("IDENTITY", "Using temporary identity...");
+      self.path = "/tmp/pwnagotchi-identity".to_string();
+      self.priv_path = format!("{}/id_rsa", &self.path);
+      self.pub_path = format!("{}/id_rsa.pub", &self.path);
+      self.fingerprint_path = format!("{}/fingerprint", &self.path);
+      let _ = std::fs::create_dir_all(&self.path);
     }
 
     loop {
@@ -126,7 +130,7 @@ impl Identity {
         }
         Err(_) => {
           // Warning because this might be the first run
-          LOGGER.log_warning("IDENTITY", "Keys failed to load. Regenerating keys.");
+          LOGGER.log_warning("IDENTITY", "Couldn't load Keys. Regenerating...");
 
           let _ = Command::new("pwngrid").arg("-generate").arg("-keys").arg(&self.path).status();
           old_header_fix(Path::new(&self.pub_path));

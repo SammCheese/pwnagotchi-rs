@@ -21,6 +21,7 @@ pub enum LogLevel {
 pub struct Log {
   file: Mutex<File>,
   debug_file: Mutex<File>,
+  has_handle: bool,
 }
 
 impl Log {
@@ -31,22 +32,28 @@ impl Log {
       && let Err(e) = fs::create_dir_all(parent)
     {
       eprintln!("Failed to create log dir {parent:?}: {e}");
+      eprintln!("Logging to /dev/null instead");
     }
 
-    let file = OpenOptions::new()
-      .create(true)
-      .append(true)
-      .open(path)
-      .expect("Failed to open log file");
-    let debug_file = OpenOptions::new()
-      .create(true)
-      .append(true)
-      .open(debug_path)
-      .expect("Failed to open debug log file");
+    let file = OpenOptions::new().create(true).append(true).open(path);
+    let debug_file = OpenOptions::new().create(true).append(true).open(debug_path);
+
+    let has_handle = file.is_ok() && debug_file.is_ok();
+    let file = file.unwrap_or_else(|e| {
+      eprintln!("Failed to open log file {path}: {e}");
+      eprintln!("Logging to /dev/null instead");
+      File::create("/dev/null").unwrap()
+    });
+    let debug_file = debug_file.unwrap_or_else(|e| {
+      eprintln!("Failed to open debug log file {debug_path}: {e}");
+      eprintln!("Logging to /dev/null instead");
+      File::create("/dev/null").unwrap()
+    });
 
     Self {
       file: Mutex::new(file),
       debug_file: Mutex::new(debug_file),
+      has_handle,
     }
   }
 
@@ -59,6 +66,11 @@ impl Log {
       origin.map_or("".to_string(), |o| format!("[{}]", o)),
       message
     );
+
+    if !self.has_handle {
+      eprintln!("{}", entry.trim());
+      return;
+    }
 
     // Log Everything to debug log
     if let Ok(mut debug_file) = self.debug_file.lock()
@@ -98,7 +110,8 @@ impl Log {
 }
 
 pub static LOGGER: std::sync::LazyLock<Log> = std::sync::LazyLock::new(|| {
-  let log = Log::new(&config().log.path, &config().log.path_debug);
+  let cfg = config();
+  let log = Log::new(&cfg.log.path, &cfg.log.path_debug);
   log.log(None, "=========== STARTED ===========", LogLevel::Info);
   log
 });

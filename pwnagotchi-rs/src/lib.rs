@@ -23,3 +23,8 @@
 pub mod components {
   pub mod manager;
 }
+
+#[cfg(test)]
+pub mod tests {
+  pub mod hookables;
+}

@@ -663,7 +663,7 @@ const fn make_line_widget(pos: ((f32, f32), (f32, f32)), color: Rgba<u8>) -> Lin
 fn make_face_widget(pos: (u32, u32), fontname: &str, color: Rgba<u8>) -> TextWidget {
   TextWidget::new(
     pos,
-    FaceType::Awake.to_string(),
+    FaceType::Sleep.to_string(),
     TextStyle {
       font: fontname.to_string(),
       color,

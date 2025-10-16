@@ -160,8 +160,9 @@ impl Server {
 
 async fn basic_auth_middleware(req: Request<Body>, next: Next) -> impl IntoResponse {
   let cfg = &config().ui.web;
+  let (username, password) = (cfg.username.to_string(), cfg.password.to_string());
 
-  if cfg.username.is_empty() || cfg.password.is_empty() {
+  if username.is_empty() || password.is_empty() {
     return next.run(req).await;
   }
 

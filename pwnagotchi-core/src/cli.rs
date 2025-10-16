@@ -1,6 +1,7 @@
 use std::{sync::Arc, time::Duration};
 
 use anyhow::Result;
+use pwnagotchi_macros::hookable;
 use pwnagotchi_shared::{
   logger::LOGGER,
   models::agent::RunningMode,
@@ -52,14 +53,19 @@ impl Component for CliComponent {
   }
 
   async fn start(&self) -> Result<Option<JoinHandle<()>>> {
-    if let Some(cli) = self.cli.as_ref() {
-      if cli.manual {
-        cli.do_manual_mode().await;
-      } else {
-        cli.do_auto_mode().await;
-      }
+    if let Some(cli) = &self.cli {
+      let cli = Arc::clone(cli);
+      let handle = tokio::spawn(async move {
+        if cli.manual {
+          cli.do_manual_mode().await;
+        } else {
+          cli.do_auto_mode().await;
+        }
+      });
+      Ok(Some(handle))
+    } else {
+      Ok(None)
     }
-    Ok(None)
   }
 }
 
@@ -77,6 +83,7 @@ pub struct Cli {
   pub manual: bool,
 }
 
+#[hookable]
 impl Cli {
   pub fn new(
     sm: Arc<SessionManager>,
@@ -122,9 +129,30 @@ impl Cli {
     }
   }
 
+  #[hookable]
   pub async fn do_manual_mode(&self) {
     LOGGER.log_info("Pwnagotchi", "Starting in manual mode...");
     self.agent.set_mode(RunningMode::Manual).await;
+
+    loop {
+      sleep(Duration::from_secs(60)).await;
+    }
+  }
+
+  #[hookable]
+  pub async fn do_custom_mode(&self, _mode: &str) {
+    LOGGER.log_info("Pwnagotchi", "Starting in custom mode...");
+    self.agent.set_mode(RunningMode::Custom).await;
+
+    loop {
+      sleep(Duration::from_secs(60)).await;
+    }
+  }
+
+  #[hookable]
+  pub async fn do_ai_mode(&self) {
+    LOGGER.log_info("Pwnagotchi", "Starting in AI mode...");
+    self.agent.set_mode(RunningMode::Ai).await;
 
     loop {
       sleep(Duration::from_secs(60)).await;

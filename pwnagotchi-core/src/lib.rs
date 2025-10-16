@@ -1,3 +1,5 @@
+#![feature(stmt_expr_attributes)]
+
 pub mod agent;
 pub mod automata;
 pub mod bettercap;

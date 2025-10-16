@@ -11,11 +11,13 @@ pub mod traits {
   pub mod epoch;
   pub mod general;
   pub mod logger;
+  pub mod plugins;
   pub mod ui;
 }
 
 pub mod types {
   pub mod epoch;
+  pub mod hooks;
   pub mod ui;
 }
 
@@ -44,5 +46,6 @@ pub mod utils {
   pub mod agent;
   pub mod faces;
   pub mod general;
+  pub mod hooks;
   pub mod wifi;
 }
