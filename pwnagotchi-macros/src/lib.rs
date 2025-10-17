@@ -69,22 +69,14 @@ fn classify_arg_type(ty: &Type) -> ArgKind {
 
 #[proc_macro_attribute]
 pub fn hookable(_args: TokenStream, input: TokenStream) -> TokenStream {
-  let input_clone = input.clone();
-
-  // Impl method
-  if let Ok(method) = syn::parse::<ImplItemFn>(input_clone.clone()) {
-    return expand_impl_method(method);
-  }
-
-  // Free function
-  let input_clone = input.clone();
-  if let Ok(func) = syn::parse::<ItemFn>(input_clone.clone()) {
-    return expand_free_fn(func);
-  }
-
   // Whole impl block
   if let Ok(item_impl) = syn::parse::<ItemImpl>(input.clone()) {
     return expand_impl(item_impl);
+  }
+
+  // Free function
+  if let Ok(func) = syn::parse::<ItemFn>(input.clone()) {
+    return expand_free_fn(func);
   }
 
   TokenStream::from(quote! {
@@ -238,21 +230,21 @@ fn expand_free_fn(item_fn: ItemFn) -> TokenStream {
 
   let unregister_fns = quote! {
     fn #unreg_before(id: u64) -> bool {
-      let mut hooks = #static_name.get_or_init(|_| parking_lot::RwLock::new(#hooks_struct_name::default())).write();
+      let mut hooks = #static_name.get_or_init(|| parking_lot::RwLock::new(#hooks_struct_name::default())).write();
       let original_len = hooks.before.len();
       hooks.before.retain(|(stored_id, _)| *stored_id != id);
       original_len != hooks.before.len()
     }
 
     fn #unreg_after(id: u64) -> bool {
-      let mut hooks = #static_name.get_or_init(|_| parking_lot::RwLock::new(#hooks_struct_name::default())).write();
+      let mut hooks = #static_name.get_or_init(|| parking_lot::RwLock::new(#hooks_struct_name::default())).write();
       let original_len = hooks.after.len();
       hooks.after.retain(|(stored_id, _)| *stored_id != id);
       original_len != hooks.after.len()
     }
 
     fn #unreg_instead(id: u64) -> bool {
-      let mut hooks = #static_name.get_or_init(|_| parking_lot::RwLock::new(#hooks_struct_name::default())).write();
+      let mut hooks = #static_name.get_or_init(|| parking_lot::RwLock::new(#hooks_struct_name::default())).write();
       let should_remove = hooks
       .instead
       .as_ref()
@@ -349,98 +341,98 @@ fn expand_free_fn(item_fn: ItemFn) -> TokenStream {
   // Wrapper
   let wrapper_fn = if is_async {
     quote! {
-        #vis #sig {
-          let hooks = match #static_name.get() {
-            Some(h) => h,
-            None => return #orig_ident(#(#arg_idents),*).await,
-          };
+      #vis #sig {
+        let hooks = match #static_name.get() {
+          Some(h) => h,
+          None => return #orig_ident(#(#arg_idents),*).await,
+        };
 
-          let (before_hooks, after_hooks, instead_hook) = {
-            let guard = hooks.read();
-            (
-              guard.before.iter().map(|(_, h)| h.clone()).collect::<Vec<_>>(),
-              guard.after.iter().map(|(_, h)| h.clone()).collect::<Vec<_>>(),
-              guard.instead.as_ref().map(|(_, h)| h.clone())
-            )
-          };
+        let (before_hooks, after_hooks, instead_hook) = {
+          let guard = hooks.read();
+          (
+            guard.before.iter().map(|(_, h)| h.clone()).collect::<Vec<_>>(),
+            guard.after.iter().map(|(_, h)| h.clone()).collect::<Vec<_>>(),
+            guard.instead.as_ref().map(|(_, h)| h.clone())
+          )
+        };
 
-          if before_hooks.is_empty() && after_hooks.is_empty() && instead_hook.is_none() {
-            return #orig_ident(#(#arg_idents),*).await;
-          }
-
-          let mut hook_args = pwnagotchi_shared::types::hooks::HookArgs::new(vec![
-            #(#arg_store_exprs_async),*
-          ]);
-
-          // Execute before hooks
-          for hook in before_hooks.iter() {
-            match (hook)(&mut hook_args).await {
-              Ok(pwnagotchi_shared::types::hooks::BeforeHookResult::Continue(args)) => {
-                hook_args = args;
-              }
-              Ok(pwnagotchi_shared::types::hooks::BeforeHookResult::Stop) => {
-                return Default::default();
-              }
-              Err(e) => {
-                eprintln!("Before hook error: {}", e);
-              }
-            }
-          }
-
-    #(#arg_extract_stmts_async)*
-
-          // Execute instead hook or original function
-          let ret = if let Some(instead) = instead_hook {
-            let hook_args_owned = pwnagotchi_shared::types::hooks::HookArgs::new(vec![
-              #(#arg_reowned_exprs_async_instead),*
-            ]);
-
-            match (instead)(hook_args_owned).await {
-              Ok(pwnagotchi_shared::types::hooks::InsteadHookResult::Return(hook_ret)) => {
-                hook_ret.take::<#ret_ty>().expect("Invalid return type from instead hook")
-              }
-              Ok(pwnagotchi_shared::types::hooks::InsteadHookResult::Continue(args)) => {
-                // Re-extract arguments and call original
-                let mut hook_args_for_extract = args;
-                #(#arg_extract_stmts_async)*
-                #orig_ident(#(#arg_idents),*).await
-              }
-              Err(e) => {
-                eprintln!("Instead hook error: {}", e);
-                #orig_ident(#(#arg_idents),*).await
-              }
-            }
-          } else {
-            #orig_ident(#(#arg_idents),*).await
-          };
-
-          if after_hooks.is_empty() {
-            return ret;
-          }
-
-          let mut hook_args = pwnagotchi_shared::types::hooks::HookArgs::new(vec![
-            #(#arg_reowned_exprs_async_after),*
-          ]);
-          let mut hook_return = pwnagotchi_shared::types::hooks::HookReturn::new(ret);
-
-          // Execute after hooks
-          for hook in after_hooks.iter() {
-            match (hook)(&mut hook_args, &mut hook_return).await {
-              Ok(pwnagotchi_shared::types::hooks::AfterHookResult::Continue(ret)) => {
-                hook_return = ret;
-              }
-              Ok(pwnagotchi_shared::types::hooks::AfterHookResult::Stop) => {
-                break;
-              }
-              Err(e) => {
-                eprintln!("After hook error: {}", e);
-              }
-            }
-          }
-
-          hook_return.take::<#ret_ty>().expect("Invalid return type modified by after hook")
+        if before_hooks.is_empty() && after_hooks.is_empty() && instead_hook.is_none() {
+          return #orig_ident(#(#arg_idents),*).await;
         }
+
+        let mut hook_args = pwnagotchi_shared::types::hooks::HookArgs::new(vec![
+          #(#arg_store_exprs_async),*
+        ]);
+
+        // Execute before hooks
+        for hook in before_hooks.iter() {
+          match (hook)(&mut hook_args).await {
+            Ok(pwnagotchi_shared::types::hooks::BeforeHookResult::Continue(args)) => {
+              hook_args = args;
+            }
+            Ok(pwnagotchi_shared::types::hooks::BeforeHookResult::Stop) => {
+              return Default::default();
+            }
+            Err(e) => {
+              eprintln!("Before hook error: {}", e);
+            }
+          }
+        }
+
+      #(#arg_extract_stmts_async)*
+
+        // Execute instead hook or original function
+        let ret = if let Some(instead) = instead_hook {
+          let hook_args_owned = pwnagotchi_shared::types::hooks::HookArgs::new(vec![
+            #(#arg_reowned_exprs_async_instead),*
+          ]);
+
+          match (instead)(hook_args_owned).await {
+            Ok(pwnagotchi_shared::types::hooks::InsteadHookResult::Return(hook_ret)) => {
+              hook_ret.take::<#ret_ty>().expect("Invalid return type from instead hook")
+            }
+            Ok(pwnagotchi_shared::types::hooks::InsteadHookResult::Delegate(args)) => {
+              // Re-extract arguments and call original
+              let mut hook_args_for_extract = args;
+              #(#arg_extract_stmts_async)*
+              #orig_ident(#(#arg_idents),*).await
+            }
+            Err(e) => {
+              eprintln!("Instead hook error: {}", e);
+              #orig_ident(#(#arg_idents),*).await
+            }
+          }
+        } else {
+          #orig_ident(#(#arg_idents),*).await
+        };
+
+        if after_hooks.is_empty() {
+          return ret;
+        }
+
+        let mut hook_args = pwnagotchi_shared::types::hooks::HookArgs::new(vec![
+          #(#arg_reowned_exprs_async_after),*
+        ]);
+        let mut hook_return = pwnagotchi_shared::types::hooks::HookReturn::new(ret);
+
+        // Execute after hooks
+        for hook in after_hooks.iter() {
+          match (hook)(&mut hook_args, &mut hook_return).await {
+            Ok(pwnagotchi_shared::types::hooks::AfterHookResult::Continue(ret)) => {
+              hook_return = ret;
+            }
+            Ok(pwnagotchi_shared::types::hooks::AfterHookResult::Stop) => {
+              break;
+            }
+            Err(e) => {
+              eprintln!("After hook error: {}", e);
+            }
+          }
+        }
+
+        hook_return.take::<#ret_ty>().expect("Invalid return type modified by after hook")
       }
+    }
   } else {
     let mut sig_no_async = sig.clone();
     sig_no_async.asyncness = None;
@@ -496,7 +488,7 @@ fn expand_free_fn(item_fn: ItemFn) -> TokenStream {
           Ok(pwnagotchi_shared::types::hooks::InsteadHookResult::Return(hook_ret)) => {
             hook_ret.take::<#ret_ty>().expect("Invalid return type from instead hook")
           }
-          Ok(pwnagotchi_shared::types::hooks::InsteadHookResult::Continue(args)) => {
+          Ok(pwnagotchi_shared::types::hooks::InsteadHookResult::Delegate(args)) => {
             // Re-extract arguments and call original
             let mut hook_args_for_extract = args;
             #(#arg_extract_stmts_sync)*
@@ -583,27 +575,6 @@ fn expand_free_fn(item_fn: ItemFn) -> TokenStream {
   TokenStream::from(expanded)
 }
 
-fn expand_impl_method(item: ImplItemFn) -> TokenStream {
-  let method = item;
-  let method_name = method.sig.ident.clone();
-  let _method_name_str = method_name.to_string();
-
-  // ensure receiver exists
-  let first_arg = method.sig.inputs.first();
-  let _recv = match first_arg {
-    Some(FnArg::Receiver(r)) => r.clone(),
-    _ => {
-      return TokenStream::from(quote! {
-        compile_error!("#[hookable] on impl methods requires a receiver (self, &self or &mut self)");
-      });
-    }
-  };
-
-  TokenStream::from(quote! {
-    compile_error!("#[hookable] on individual impl methods is not supported.");
-  })
-}
-
 fn expand_impl(item_impl: ItemImpl) -> TokenStream {
   let mut out_impl = item_impl.clone();
 
@@ -617,29 +588,17 @@ fn expand_impl(item_impl: ItemImpl) -> TokenStream {
       .unwrap_or_else(|| "Unknown".into()),
     _ => "Unknown".into(),
   };
-  let _type_name_ident = match *item_impl.self_ty.clone() {
-    Type::Path(ref tp) => tp.path.segments.last().unwrap().ident.clone(),
-    _ => format_ident!("Unknown"),
-  };
 
   let mut generated: Vec<proc_macro2::TokenStream> = Vec::new();
-
   let mut extra_methods: Vec<ImplItem> = Vec::new();
 
   for item in out_impl.items.iter_mut() {
     if let ImplItem::Fn(method) = item {
-      let mut had = false;
       // Remove hookable attribute to avoid recursion
-      method.attrs.retain(|attr| {
-        if attr.path().is_ident("hookable") {
-          had = true;
-          false
-        } else {
-          true
-        }
-      });
+      method.attrs.retain(|attr| !attr.path().is_ident("hookable"));
 
-      if !had {
+      let first_arg = method.sig.inputs.first();
+      if !matches!(first_arg, Some(FnArg::Receiver(_))) {
         continue;
       }
 
@@ -955,7 +914,7 @@ fn expand_impl(item_impl: ItemImpl) -> TokenStream {
                 Ok(pwnagotchi_shared::types::hooks::InsteadHookResult::Return(ret)) => {
                   ret.take::<#ret_type>().expect("Invalid return type from instead hook")
                 },
-                Ok(pwnagotchi_shared::types::hooks::InsteadHookResult::Continue(hook_args)) => {
+                Ok(pwnagotchi_shared::types::hooks::InsteadHookResult::Delegate(hook_args)) => {
                   #(#method_extract_stmts_async)*;
                   instance.#original_name(#(#method_arg_names),*).await
                 }
@@ -1040,7 +999,7 @@ fn expand_impl(item_impl: ItemImpl) -> TokenStream {
                 Ok(pwnagotchi_shared::types::hooks::InsteadHookResult::Return(ret)) => {
                   ret.take::<#ret_type>().expect("Invalid return type from instead hook")
                 },
-                Ok(pwnagotchi_shared::types::hooks::InsteadHookResult::Continue(args)) => {
+                Ok(pwnagotchi_shared::types::hooks::InsteadHookResult::Delegate(args)) => {
                   #(#method_extract_stmts_sync)*;
                   instance.#original_name(#(#method_arg_names),*)
                 }

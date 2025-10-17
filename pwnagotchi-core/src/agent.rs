@@ -174,14 +174,12 @@ impl Agent {
     }
   }
 
-  #[hookable]
   pub async fn set_access_points(&self, aps: &Vec<AccessPoint>) {
     let session = self.sm.get_session();
     self.epoch.write().observe(aps, &session.read().state.peers);
     session.write().state.access_points.clone_from(aps);
   }
 
-  #[hookable]
   pub async fn get_access_points(&self) -> Vec<AccessPoint> {
     let ignored: HashSet<String> =
       config().main.whitelist.iter().map(|s| s.to_lowercase()).collect();
@@ -213,7 +211,6 @@ impl Agent {
     aps
   }
 
-  #[hookable]
   fn should_interact(&self, bssid: &str) -> bool {
     let session = self.sm.get_session();
     if has_handshake(&session, bssid) {
@@ -232,7 +229,6 @@ impl Agent {
     session.read().state.history[&bssid.to_string()] < config().personality.max_interactions
   }
 
-  #[hookable]
   async fn set_mode(&self, mode: RunningMode) {
     let session = self.sm.get_session();
     let (started_at, supported_channels, state) = {
@@ -265,7 +261,6 @@ impl Agent {
     }
   }
 
-  #[hookable]
   async fn recon(&self) {
     let mut recon_time = config().personality.recon_time;
     let max_inactive = config().personality.max_inactive_scale;
@@ -318,7 +313,6 @@ impl Agent {
     self.observer.wait_for(recon_time, Some(false)).await;
   }
 
-  #[hookable]
   #[allow(unused_mut)]
   async fn associate(&self, ap: &AccessPoint, mut throttle: Option<f32>) {
     if self.observer.is_stale() {
@@ -384,7 +378,6 @@ impl Agent {
     }
   }
 
-  #[hookable]
   #[allow(unused_mut)]
   async fn deauth(&self, ap: &AccessPoint, sta: &Station, mut throttle: Option<f32>) {
     if self.observer.is_stale() {
@@ -450,7 +443,6 @@ impl Agent {
     }
   }
 
-  #[hookable]
   async fn set_channel(&self, channel: u8) {
     if self.observer.is_stale() {
       LOGGER.log_debug("AGENT", &format!("Recon is stale, skipping channel switch to {channel}"));
@@ -502,7 +494,6 @@ impl Agent {
     }
   }
 
-  #[hookable]
   async fn get_access_points_by_channel(&self) -> Vec<(u8, Vec<AccessPoint>)> {
     let aps = self.get_access_points().await;
 
@@ -526,20 +517,17 @@ impl Agent {
     grouped_vec
   }
 
-  #[hookable]
   fn start_pwnagotchi(&self) {
     self.observer.set_starting();
     self.observer.next_epoch();
     self.observer.set_ready();
   }
 
-  #[hookable]
   fn reboot(&self) {
     LOGGER.log_info("Agent", "Rebooting agent...");
     self.observer.set_rebooting();
   }
 
-  #[hookable]
   fn restart(&self, mode: Option<RunningMode>) {
     let _mode = mode.unwrap_or(RunningMode::Auto);
   }

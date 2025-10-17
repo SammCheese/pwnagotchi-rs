@@ -13,7 +13,7 @@ pub enum AfterHookResult {
 }
 
 pub enum InsteadHookResult {
-  Continue(HookArgs),
+  Delegate(HookArgs),
   Return(HookReturn),
 }
 

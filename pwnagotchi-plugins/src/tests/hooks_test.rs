@@ -1,3 +1,5 @@
+use pwnagotchi_macros::hookable;
+
 #[cfg(test)]
 pub mod hook_macro_helper_tests {
   #[allow(unused_imports)]
@@ -273,12 +275,18 @@ pub mod hook_syntax_tests {
 pub mod hook_behavior_tests {
   use std::sync::Arc;
 
+  // We need these imports for the tests even if unused for the linker
+  #[allow(unused_imports)]
+  use pwnagotchi_core::{agent::Agent, utils};
   use pwnagotchi_shared::types::hooks::{
     AfterHook, AfterHookResult, BeforeHook, BeforeHookResult, HookArgs, HookReturn, InsteadHook,
     InsteadHookResult,
   };
 
-  use crate::{managers::hook_manager::HookManager, traits::hooks::DynamicHookAPITrait};
+  use crate::{
+    instead_hook, managers::hook_manager::HookManager, tests::hooks_test::test_add,
+    traits::hooks::DynamicHookAPITrait,
+  };
 
   #[test]
   fn before_hook_can_stop_execution() {
@@ -330,14 +338,47 @@ pub mod hook_behavior_tests {
   }
 
   #[test]
-  fn instead_hook_can_continue_to_original() {
+  fn instead_hook_can_delegate() {
     let manager = HookManager::new();
     let mut api = manager.scope("test_plugin");
 
-    let instead: InsteadHook = Arc::new(|args: HookArgs| Ok(InsteadHookResult::Continue(args)));
+    assert_eq!(test_add(0), 42, "Original function should return 42");
 
-    api
-      .register_instead("Agent::reboot", Box::new(instead))
-      .expect("Should register");
+    let instead: InsteadHook = instead_hook!(|args: HookArgs| {
+      // If the first argument is 5, Return 50 :3
+      if args.get::<i8>(0) == Some(&5) {
+        Ok(InsteadHookResult::Return(HookReturn::new::<i8>(42 + 8)))
+      } else {
+        // Otherwise call original function
+        Ok(InsteadHookResult::Delegate(args))
+      }
+    });
+
+    api.register_instead("test_add", Box::new(instead)).expect("Should register");
+
+    assert_eq!(test_add(0), 42, "Delegation should return 42");
+    assert_eq!(test_add(5), 50, "Hooked function should return 50");
   }
+
+  #[test]
+  fn instead_hook_functional() {
+    let manager = HookManager::new();
+    let mut api = manager.scope("test_plugin");
+
+    let instead: InsteadHook = instead_hook!(|args: HookArgs| {
+      println!("I like 45 more");
+      Ok(InsteadHookResult::Return(HookReturn::new(45 + args.get::<i8>(0).unwrap())))
+    });
+
+    api.register_instead_sync("test_add", instead).expect("Should register");
+
+    assert_eq!(test_add(0), 45, "Hooked function should return 45");
+  }
+}
+
+// dont listen to the error, its lying
+#[hookable]
+fn test_add(add: i8) -> i8 {
+  println!("Original test_add called");
+  42 + add
 }
