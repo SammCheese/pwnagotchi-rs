@@ -7,6 +7,8 @@
   clippy::cargo
 )]
 #![deny(clippy::correctness, clippy::perf)]
+#![allow(clippy::missing_safety_doc)]
+#![allow(clippy::cargo_common_metadata)]
 // I occasionally add functions required but not implemented yet
 // Helps with TODOS
 #![allow(dead_code, reason = "Occasional placeholders for future implementation")]

@@ -124,6 +124,10 @@ pub struct DynamicHookAPI<'a> {
 }
 
 impl DynamicHookAPITrait for DynamicHookAPI<'_> {
+  fn registered(&self) -> &[(String, u64)] {
+    &self.registered_hooks
+  }
+
   fn register_before(
     &mut self,
     hook_name: &str,
@@ -180,14 +184,6 @@ impl DynamicHookAPITrait for DynamicHookAPI<'_> {
         "Hook with ID {} not found in plugin '{}'",
         hook_id, self.plugin_name
       )))
-    }
-  }
-}
-
-impl Drop for DynamicHookAPI<'_> {
-  fn drop(&mut self) {
-    if let Err(e) = self.manager.unregister_plugin(&self.plugin_name) {
-      eprintln!("Failed to cleanup hooks for plugin '{}': {}", self.plugin_name, e);
     }
   }
 }

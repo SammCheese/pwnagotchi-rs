@@ -10,6 +10,7 @@ use pwnagotchi_shared::types::hooks::{
 };
 
 pub trait DynamicHookAPITrait {
+  fn registered(&self) -> &[(String, u64)];
   fn register_before(
     &mut self,
     hook_name: &str,

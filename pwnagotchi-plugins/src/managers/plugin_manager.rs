@@ -133,7 +133,7 @@ impl PluginManager {
         match entry.plugin.on_load(&mut scoped_api, core) {
           Ok(_) => {
             entry.state = PluginState::Initialized;
-            println!("Plugin '{}' initialized successfully.", name);
+            LOGGER.log_debug("PLUGINS", &format!("Plugin '{}' initialized successfully.", name));
           }
           Err(e) => {
             if let Err(hook_err) = self.hook_manager.unregister_plugin(&name) {

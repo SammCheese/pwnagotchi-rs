@@ -1,0 +1,14 @@
+[package]
+name = "awesomehooks"
+version = "0.1.0"
+edition = "2024"
+description = "An example Pwnagotchi-rs plugin demonstrating awesome hooking capabilities."
+authors = ["Sammy <sammy@sammcheese.net>"]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+pwnagotchi-plugins = { workspace = true }
+pwnagotchi-shared = { workspace = true }
+pwnagotchi-macros = { workspace = true }

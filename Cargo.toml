@@ -18,10 +18,20 @@ members = [
   "pwnagotchi-rs", 
   "pwnagotchi-shared", 
   "pwnagotchi-plugins",
-  "pwnagotchi-macros"
+  "pwnagotchi-macros",
+  "pwnagotchi-plugin-dev",
+  "pwnagotchi-plugin-dev/src/examples/*",
+  "pwnagotchi-plugin-dev/src/plugins/*",
+]
+exclude = [
+  "pwnagotchi-plugin-dev/target",
 ]
 
 [workspace.dependencies]
+pwnagotchi-shared = { path = "pwnagotchi-shared" }
+pwnagotchi-plugins = { path = "pwnagotchi-plugins" }
+pwnagotchi-macros = { path = "pwnagotchi-macros" }
+
 tokio = { version = "1.48.0", features = ["time", "rt-multi-thread", "process", "signal", "sync"] }
 tokio-stream = { version = "0.1.17", features = ["io-util"] }
 futures-util = { version = "0.3.31", default-features = false, features = ["sink"] }

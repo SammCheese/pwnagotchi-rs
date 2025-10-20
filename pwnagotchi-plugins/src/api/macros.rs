@@ -24,7 +24,7 @@ macro_rules! async_before_hook {
           Box<
             dyn std::future::Future<
                 Output = Result<
-                  pwnagotchi_shared::types::hooks::BeforeHookResult,
+                  ::pwnagotchi_shared::types::hooks::BeforeHookResult,
                   Box<dyn std::error::Error + Send + Sync>,
                 >,
               > + Send,

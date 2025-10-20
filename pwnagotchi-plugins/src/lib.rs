@@ -2,11 +2,6 @@ pub mod api;
 pub mod loaders;
 pub mod traits;
 
-pub mod examples {
-  pub mod awesome_hooking;
-  pub mod hello_world;
-}
-
 pub mod managers {
   pub mod hook_manager;
   pub mod plugin_manager;

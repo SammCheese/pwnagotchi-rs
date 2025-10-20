@@ -76,7 +76,7 @@ pub async fn profile_handler(State(state): State<Arc<WebUIState>>) -> impl IntoR
   }
 }
 
-pub async fn plugins_handler() -> impl IntoResponse {
+pub async fn plugins_handler(State(_state): State<Arc<WebUIState>>) -> impl IntoResponse {
   let tpl = PluginsTemplate {
     base: make_base("Plugins", "plugins"),
     plugins: vec![],

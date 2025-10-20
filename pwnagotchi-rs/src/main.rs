@@ -29,7 +29,6 @@ use pwnagotchi_shared::{
     general::{Component, CoreModules},
     ui::ViewTrait,
   },
-  types::hooks::HookDescriptor,
 };
 use pwnagotchi_ui::{
   ui::{
@@ -134,11 +133,6 @@ async fn main() -> anyhow::Result<()> {
   // initialization
   plugin_manager.set_coremodules(Arc::clone(&core_modules));
   plugin_manager.initialize_plugins();
-
-  // Debug: Print all inventory items
-  for hook in inventory::iter::<HookDescriptor>() {
-    println!("Registered hookable method: {}", hook.name);
-  }
 
   LOGGER.log_debug("Pwnagotchi", "Loading Components");
 

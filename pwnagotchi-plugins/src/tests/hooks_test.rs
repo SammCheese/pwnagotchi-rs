@@ -40,7 +40,7 @@ pub mod hook_macro_helper_tests {
 
     // Sync after hook for Agent::should_interact (returns bool)
     let after: AfterHook = after_hook!(|args: &mut HookArgs, ret: &mut HookReturn| {
-      let _bssid: &String = args.get(1).unwrap();
+      let _bssid: &String = args.get_by_downcast(1).unwrap();
       let result: &bool = ret.get().unwrap();
       println!("AFTER: Agent::should_interact returned {}", result);
       Ok(AfterHookResult::Continue(HookReturn::new(*result)))
@@ -114,7 +114,7 @@ pub mod hook_macro_helper_tests {
 
     let instead: AsyncInsteadHook = async_instead_hook!(|args: HookArgs| {
       async move {
-        let mode: &RunningMode = args.get(1).unwrap();
+        let mode: &RunningMode = args.get_by_downcast(1).unwrap();
         println!("ASYNC INSTEAD: Preventing mode change to {:?}", mode);
         Ok(InsteadHookResult::Return(HookReturn::new(())))
       }
@@ -164,7 +164,7 @@ pub mod hook_syntax_tests {
 
     // Sync after hook for Agent::should_interact (returns bool)
     let after: AfterHook = Arc::new(|args: &mut HookArgs, ret: &mut HookReturn| {
-      let _bssid: &String = args.get(1).unwrap();
+      let _bssid: &String = args.get_by_downcast(1).unwrap();
       let result: &bool = ret.get().unwrap();
       println!("AFTER: Agent::should_interact returned {}", result);
       Ok(AfterHookResult::Continue(HookReturn::new(*result)))
@@ -252,7 +252,7 @@ pub mod hook_syntax_tests {
 
     let instead: AsyncInsteadHook = Arc::new(|args: HookArgs| {
       Box::pin(async move {
-        let mode: &RunningMode = args.get(1).unwrap();
+        let mode: &RunningMode = args.get_by_downcast(1).unwrap();
         println!("ASYNC INSTEAD: Preventing mode change to {:?}", mode);
         Ok(InsteadHookResult::Return(HookReturn::new(())))
       })
@@ -327,7 +327,7 @@ pub mod hook_behavior_tests {
 
     let instead: InsteadHook = Arc::new(|args: HookArgs| {
       // Completely replace the function logic
-      let bssid: &String = args.get(1).unwrap();
+      let bssid: &String = args.get_by_downcast(1).unwrap();
       let custom_result = bssid.starts_with("AA:");
       Ok(InsteadHookResult::Return(HookReturn::new(custom_result)))
     });
@@ -346,7 +346,7 @@ pub mod hook_behavior_tests {
 
     let instead: InsteadHook = instead_hook!(|args: HookArgs| {
       // If the first argument is 5, Return 50 :3
-      if args.get::<i8>(0) == Some(&5) {
+      if args.get::<i8>(0) == Some(5) {
         Ok(InsteadHookResult::Return(HookReturn::new::<i8>(42 + 8)))
       } else {
         // Otherwise call original function

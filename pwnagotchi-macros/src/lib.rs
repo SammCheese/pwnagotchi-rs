@@ -266,24 +266,24 @@ fn expand_free_fn(item_fn: ItemFn) -> TokenStream {
     static #return_ident: &str = #ret_ty_string;
   };
 
-  let mut arg_store_exprs: Vec<proc_macro2::TokenStream> = Vec::new();
-  let mut arg_reowned_exprs: Vec<proc_macro2::TokenStream> = Vec::new();
+  let mut arg_capture_exprs: Vec<proc_macro2::TokenStream> = Vec::new();
+  let mut arg_reowned_capture_exprs: Vec<proc_macro2::TokenStream> = Vec::new();
   let mut arg_extract_stmts: Vec<proc_macro2::TokenStream> = Vec::new();
 
   for (idx, (ident, ty)) in arg_idents.iter().zip(arg_syn_types.iter()).enumerate() {
     let idx_lit = syn::Index::from(idx);
     match classify_arg_type(ty) {
       ArgKind::StrRef => {
-        arg_store_exprs.push(quote! {
-          Box::new((#ident).to_string()) as Box<dyn std::any::Any + Send + Sync>
+        arg_capture_exprs.push(quote! {
+          pwnagotchi_shared::types::hooks::CapturedArg::capture(String::from(#ident))
         });
-        arg_reowned_exprs.push(quote! {
-          Box::new((#ident).to_string()) as Box<dyn std::any::Any + Send + Sync>
+        arg_reowned_capture_exprs.push(quote! {
+          pwnagotchi_shared::types::hooks::CapturedArg::capture(String::from(#ident))
         });
         arg_extract_stmts.push(quote! {
           let #ident = {
             let value = hook_args
-              .get::<String>(#idx_lit)
+              .get_by_downcast::<String>(#idx_lit)
               .unwrap_or_else(|| panic!("Failed to extract arg {}", #idx_lit));
             value.as_str()
           };
@@ -291,11 +291,11 @@ fn expand_free_fn(item_fn: ItemFn) -> TokenStream {
       }
       ArgKind::Ref { mutable, elem } => {
         let elem_tokens = quote! { #elem };
-        arg_store_exprs.push(quote! {
-          Box::new((*(#ident)).clone()) as Box<dyn std::any::Any + Send + Sync>
+        arg_capture_exprs.push(quote! {
+          pwnagotchi_shared::types::hooks::CapturedArg::raw((*(#ident)).clone())
         });
-        arg_reowned_exprs.push(quote! {
-          Box::new((*(#ident)).clone()) as Box<dyn std::any::Any + Send + Sync>
+        arg_reowned_capture_exprs.push(quote! {
+          pwnagotchi_shared::types::hooks::CapturedArg::raw((*(#ident)).clone())
         });
         if mutable {
           arg_extract_stmts.push(quote! {
@@ -306,35 +306,34 @@ fn expand_free_fn(item_fn: ItemFn) -> TokenStream {
         } else {
           arg_extract_stmts.push(quote! {
             let #ident = hook_args
-              .get::<#elem_tokens>(#idx_lit)
+              .get_by_downcast::<#elem_tokens>(#idx_lit)
               .unwrap_or_else(|| panic!("Failed to extract arg {}", #idx_lit));
           });
         }
       }
       ArgKind::Other => {
         let ty_tokens = quote! { #ty };
-        arg_store_exprs.push(quote! {
-          Box::new((#ident).clone()) as Box<dyn std::any::Any + Send + Sync>
+        arg_capture_exprs.push(quote! {
+          pwnagotchi_shared::types::hooks::CapturedArg::capture((#ident).clone())
         });
-        arg_reowned_exprs.push(quote! {
-          Box::new((#ident).clone()) as Box<dyn std::any::Any + Send + Sync>
+        arg_reowned_capture_exprs.push(quote! {
+          pwnagotchi_shared::types::hooks::CapturedArg::capture((#ident).clone())
         });
         arg_extract_stmts.push(quote! {
           let #ident = hook_args
             .get::<#ty_tokens>(#idx_lit)
-            .unwrap_or_else(|| panic!("Failed to extract arg {}", #idx_lit))
-            .clone();
+            .unwrap_or_else(|| panic!("Failed to extract arg {}", #idx_lit));
         });
       }
     }
   }
 
-  let arg_store_exprs_async = arg_store_exprs.clone();
-  let arg_store_exprs_sync = arg_store_exprs.clone();
-  let arg_reowned_exprs_async_instead = arg_reowned_exprs.clone();
-  let arg_reowned_exprs_async_after = arg_reowned_exprs.clone();
-  let arg_reowned_exprs_sync_instead = arg_reowned_exprs.clone();
-  let arg_reowned_exprs_sync_after = arg_reowned_exprs.clone();
+  let arg_capture_exprs_async = arg_capture_exprs.clone();
+  let arg_capture_exprs_sync = arg_capture_exprs.clone();
+  let arg_reowned_capture_exprs_async_instead = arg_reowned_capture_exprs.clone();
+  let arg_reowned_capture_exprs_async_after = arg_reowned_capture_exprs.clone();
+  let arg_reowned_capture_exprs_sync_instead = arg_reowned_capture_exprs.clone();
+  let arg_reowned_capture_exprs_sync_after = arg_reowned_capture_exprs.clone();
   let arg_extract_stmts_async = arg_extract_stmts.clone();
   let arg_extract_stmts_sync = arg_extract_stmts.clone();
 
@@ -360,8 +359,8 @@ fn expand_free_fn(item_fn: ItemFn) -> TokenStream {
           return #orig_ident(#(#arg_idents),*).await;
         }
 
-        let mut hook_args = pwnagotchi_shared::types::hooks::HookArgs::new(vec![
-          #(#arg_store_exprs_async),*
+        let mut hook_args = pwnagotchi_shared::types::hooks::HookArgs::from_captured(vec![
+          #(#arg_capture_exprs_async),*
         ]);
 
         // Execute before hooks
@@ -383,20 +382,18 @@ fn expand_free_fn(item_fn: ItemFn) -> TokenStream {
 
         // Execute instead hook or original function
         let ret = if let Some(instead) = instead_hook {
-          let hook_args_owned = pwnagotchi_shared::types::hooks::HookArgs::new(vec![
-            #(#arg_reowned_exprs_async_instead),*
+          let hook_args_owned = pwnagotchi_shared::types::hooks::HookArgs::from_captured(vec![
+            #(#arg_reowned_capture_exprs_async_instead),*
           ]);
 
           match (instead)(hook_args_owned).await {
             Ok(pwnagotchi_shared::types::hooks::InsteadHookResult::Return(hook_ret)) => {
               hook_ret.take::<#ret_ty>().expect("Invalid return type from instead hook")
             }
-            Ok(pwnagotchi_shared::types::hooks::InsteadHookResult::Delegate(args)) => {
-              // Re-extract arguments and call original
-              let mut hook_args_for_extract = args;
-              #(#arg_extract_stmts_async)*
-              #orig_ident(#(#arg_idents),*).await
-            }
+          Ok(pwnagotchi_shared::types::hooks::InsteadHookResult::Delegate(mut args)) => {
+            #(#arg_extract_stmts_async)*;
+            #orig_ident(#(#arg_idents),*).await
+          }
             Err(e) => {
               eprintln!("Instead hook error: {}", e);
               #orig_ident(#(#arg_idents),*).await
@@ -410,8 +407,8 @@ fn expand_free_fn(item_fn: ItemFn) -> TokenStream {
           return ret;
         }
 
-        let mut hook_args = pwnagotchi_shared::types::hooks::HookArgs::new(vec![
-          #(#arg_reowned_exprs_async_after),*
+        let mut hook_args = pwnagotchi_shared::types::hooks::HookArgs::from_captured(vec![
+          #(#arg_reowned_capture_exprs_async_after),*
         ]);
         let mut hook_return = pwnagotchi_shared::types::hooks::HookReturn::new(ret);
 
@@ -457,8 +454,8 @@ fn expand_free_fn(item_fn: ItemFn) -> TokenStream {
         return #orig_ident(#(#arg_idents),*);
       }
 
-      let mut hook_args = pwnagotchi_shared::types::hooks::HookArgs::new(vec![
-        #(#arg_store_exprs_sync),*
+      let mut hook_args = pwnagotchi_shared::types::hooks::HookArgs::from_captured(vec![
+        #(#arg_capture_exprs_sync),*
       ]);
 
       // Execute before hooks
@@ -480,18 +477,17 @@ fn expand_free_fn(item_fn: ItemFn) -> TokenStream {
 
       // Execute instead hook or original function
       let ret = if let Some(instead) = instead_hook {
-        let hook_args_owned = pwnagotchi_shared::types::hooks::HookArgs::new(vec![
-          #(#arg_reowned_exprs_sync_instead),*
+        let hook_args_owned = pwnagotchi_shared::types::hooks::HookArgs::from_captured(vec![
+          #(#arg_reowned_capture_exprs_sync_instead),*
         ]);
 
         match (instead)(hook_args_owned) {
           Ok(pwnagotchi_shared::types::hooks::InsteadHookResult::Return(hook_ret)) => {
             hook_ret.take::<#ret_ty>().expect("Invalid return type from instead hook")
           }
-          Ok(pwnagotchi_shared::types::hooks::InsteadHookResult::Delegate(args)) => {
+          Ok(pwnagotchi_shared::types::hooks::InsteadHookResult::Delegate(mut args)) => {
             // Re-extract arguments and call original
-            let mut hook_args_for_extract = args;
-            #(#arg_extract_stmts_sync)*
+            #(#arg_extract_stmts_sync)*;
             #orig_ident(#(#arg_idents),*)
           }
           Err(e) => {
@@ -507,8 +503,8 @@ fn expand_free_fn(item_fn: ItemFn) -> TokenStream {
         return ret;
       }
 
-      let mut hook_args = pwnagotchi_shared::types::hooks::HookArgs::new(vec![
-        #(#arg_reowned_exprs_sync_after),*
+      let mut hook_args = pwnagotchi_shared::types::hooks::HookArgs::from_captured(vec![
+        #(#arg_reowned_capture_exprs_sync_after),*
       ]);
       let mut hook_return = pwnagotchi_shared::types::hooks::HookReturn::new(ret);
 
@@ -793,8 +789,8 @@ fn expand_impl(item_impl: ItemImpl) -> TokenStream {
         static #return_ident: &str = #ret_type_string;
       };
 
-      let mut method_store_exprs: Vec<proc_macro2::TokenStream> = Vec::new();
-      let mut method_reowned_exprs: Vec<proc_macro2::TokenStream> = Vec::new();
+      let mut method_capture_exprs: Vec<proc_macro2::TokenStream> = Vec::new();
+      let mut method_reowned_capture_exprs: Vec<proc_macro2::TokenStream> = Vec::new();
       let mut method_extract_stmts: Vec<proc_macro2::TokenStream> = Vec::new();
 
       for (idx, (ident, ty)) in method_arg_names.iter().zip(method_arg_syn_types.iter()).enumerate()
@@ -802,16 +798,16 @@ fn expand_impl(item_impl: ItemImpl) -> TokenStream {
         let idx_lit = syn::Index::from(idx);
         match classify_arg_type(ty) {
           ArgKind::StrRef => {
-            method_store_exprs.push(quote! {
-              Box::new((#ident).to_string()) as Box<dyn std::any::Any + Send + Sync>
+            method_capture_exprs.push(quote! {
+              pwnagotchi_shared::types::hooks::CapturedArg::capture(String::from(#ident))
             });
-            method_reowned_exprs.push(quote! {
-              Box::new((#ident).to_string()) as Box<dyn std::any::Any + Send + Sync>
+            method_reowned_capture_exprs.push(quote! {
+              pwnagotchi_shared::types::hooks::CapturedArg::capture(String::from(#ident))
             });
             method_extract_stmts.push(quote! {
               let #ident = {
                 let value = hook_args
-                  .get::<String>(#idx_lit)
+                  .get_by_downcast::<String>(#idx_lit)
                   .unwrap_or_else(|| panic!("Failed to extract arg {}", #idx_lit));
                 value.as_str()
               };
@@ -819,11 +815,11 @@ fn expand_impl(item_impl: ItemImpl) -> TokenStream {
           }
           ArgKind::Ref { mutable, elem } => {
             let elem_tokens = quote! { #elem };
-            method_store_exprs.push(quote! {
-              Box::new((*(#ident)).clone()) as Box<dyn std::any::Any + Send + Sync>
+            method_capture_exprs.push(quote! {
+              pwnagotchi_shared::types::hooks::CapturedArg::raw((*(#ident)).clone())
             });
-            method_reowned_exprs.push(quote! {
-              Box::new((*(#ident)).clone()) as Box<dyn std::any::Any + Send + Sync>
+            method_reowned_capture_exprs.push(quote! {
+              pwnagotchi_shared::types::hooks::CapturedArg::raw((*(#ident)).clone())
             });
             if mutable {
               method_extract_stmts.push(quote! {
@@ -834,35 +830,34 @@ fn expand_impl(item_impl: ItemImpl) -> TokenStream {
             } else {
               method_extract_stmts.push(quote! {
                 let #ident = hook_args
-                  .get::<#elem_tokens>(#idx_lit)
+                  .get_by_downcast::<#elem_tokens>(#idx_lit)
                   .unwrap_or_else(|| panic!("Failed to extract arg {}", #idx_lit));
               });
             }
           }
           ArgKind::Other => {
             let ty_tokens = quote! { #ty };
-            method_store_exprs.push(quote! {
-              Box::new((#ident).clone()) as Box<dyn std::any::Any + Send + Sync>
+            method_capture_exprs.push(quote! {
+              pwnagotchi_shared::types::hooks::CapturedArg::capture((#ident).clone())
             });
-            method_reowned_exprs.push(quote! {
-              Box::new((#ident).clone()) as Box<dyn std::any::Any + Send + Sync>
+            method_reowned_capture_exprs.push(quote! {
+              pwnagotchi_shared::types::hooks::CapturedArg::capture((#ident).clone())
             });
             method_extract_stmts.push(quote! {
               let #ident = hook_args
                 .get::<#ty_tokens>(#idx_lit)
-                .unwrap_or_else(|| panic!("Failed to extract arg {}", #idx_lit))
-                .clone();
+                .unwrap_or_else(|| panic!("Failed to extract arg {}", #idx_lit));
             });
           }
         }
       }
 
-      let method_store_exprs_async = method_store_exprs.clone();
-      let method_store_exprs_sync = method_store_exprs.clone();
-      let method_reowned_exprs_async_instead = method_reowned_exprs.clone();
-      let method_reowned_exprs_async_after = method_reowned_exprs.clone();
-      let method_reowned_exprs_sync_instead = method_reowned_exprs.clone();
-      let method_reowned_exprs_sync_after = method_reowned_exprs.clone();
+      let method_capture_exprs_async = method_capture_exprs.clone();
+      let method_capture_exprs_sync = method_capture_exprs.clone();
+      let method_reowned_capture_exprs_async_instead = method_reowned_capture_exprs.clone();
+      let method_reowned_capture_exprs_async_after = method_reowned_capture_exprs.clone();
+      let method_reowned_capture_exprs_sync_instead = method_reowned_capture_exprs.clone();
+      let method_reowned_capture_exprs_sync_after = method_reowned_capture_exprs.clone();
       let method_extract_stmts_async = method_extract_stmts.clone();
       let method_extract_stmts_sync = method_extract_stmts.clone();
 
@@ -887,8 +882,8 @@ fn expand_impl(item_impl: ItemImpl) -> TokenStream {
               return instance.#original_name(#(#method_arg_names),*).await;
             }
 
-            let mut hook_args = pwnagotchi_shared::types::hooks::HookArgs::new(vec![
-              #(#method_store_exprs_async),*
+            let mut hook_args = pwnagotchi_shared::types::hooks::HookArgs::from_captured(vec![
+              #(#method_capture_exprs_async),*
             ]);
 
             for hook in before_hooks.iter() {
@@ -906,8 +901,8 @@ fn expand_impl(item_impl: ItemImpl) -> TokenStream {
             #(#method_extract_stmts_async)*
 
             let ret = if let Some(instead) = instead_hook {
-              let hook_args_owned = pwnagotchi_shared::types::hooks::HookArgs::new(vec![
-                #(#method_reowned_exprs_async_instead),*
+              let hook_args_owned = pwnagotchi_shared::types::hooks::HookArgs::from_captured(vec![
+                #(#method_reowned_capture_exprs_async_instead),*
               ]);
 
               match (instead)(hook_args_owned).await {
@@ -931,8 +926,8 @@ fn expand_impl(item_impl: ItemImpl) -> TokenStream {
               return ret;
             }
 
-            let mut hook_args = pwnagotchi_shared::types::hooks::HookArgs::new(vec![
-              #(#method_reowned_exprs_async_after),*
+            let mut hook_args = pwnagotchi_shared::types::hooks::HookArgs::from_captured(vec![
+              #(#method_reowned_capture_exprs_async_after),*
             ]);
             let mut hook_return = pwnagotchi_shared::types::hooks::HookReturn::new(ret);
 
@@ -972,8 +967,8 @@ fn expand_impl(item_impl: ItemImpl) -> TokenStream {
               return instance.#original_name(#(#method_arg_names),*);
             }
 
-            let mut hook_args = pwnagotchi_shared::types::hooks::HookArgs::new(vec![
-              #(#method_store_exprs_sync),*
+            let mut hook_args = pwnagotchi_shared::types::hooks::HookArgs::from_captured(vec![
+              #(#method_capture_exprs_sync),*
             ]);
 
             for hook in before_hooks.iter() {
@@ -991,8 +986,8 @@ fn expand_impl(item_impl: ItemImpl) -> TokenStream {
             #(#method_extract_stmts_sync)*
 
             let mut ret_value = if let Some(instead) = instead_hook {
-              let hook_args_owned = pwnagotchi_shared::types::hooks::HookArgs::new(vec![
-                #(#method_reowned_exprs_sync_instead),*
+              let hook_args_owned = pwnagotchi_shared::types::hooks::HookArgs::from_captured(vec![
+                #(#method_reowned_capture_exprs_sync_instead),*
               ]);
 
               match (instead)(hook_args_owned) {
@@ -1016,8 +1011,8 @@ fn expand_impl(item_impl: ItemImpl) -> TokenStream {
               return ret_value;
             }
 
-            let mut hook_args = pwnagotchi_shared::types::hooks::HookArgs::new(vec![
-              #(#method_reowned_exprs_sync_after),*
+            let mut hook_args = pwnagotchi_shared::types::hooks::HookArgs::from_captured(vec![
+              #(#method_reowned_capture_exprs_sync_after),*
             ]);
             let mut hook_return = pwnagotchi_shared::types::hooks::HookReturn::new(ret_value);
 

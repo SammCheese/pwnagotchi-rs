@@ -1,8 +1,10 @@
 use std::{borrow::Cow, collections::HashMap};
 
+use serde::{Deserialize, Serialize};
+
 use crate::models::bettercap::Meta;
 
-#[derive(serde::Deserialize, Debug, Clone)]
+#[derive(Deserialize, Debug, Clone, Serialize)]
 
 pub struct Station {
   pub ipv4: Cow<'static, str>,
@@ -25,7 +27,7 @@ pub struct Station {
   pub wps: HashMap<String, String>,
 }
 
-#[derive(serde::Deserialize, Debug, Clone)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 
 pub struct AccessPoint {
   pub ipv4: Cow<'static, str>,
@@ -50,7 +52,7 @@ pub struct AccessPoint {
   pub handshake: bool,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Handshake {
   pub mac: String,
   pub timestamp: std::time::SystemTime,

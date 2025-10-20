@@ -67,6 +67,9 @@ mod manager_tests {
         .expect("registration should succeed");
 
       assert_eq!(api.registered_hooks.len(), 1, "One hook should be registered");
+
+      // Explicit cleanup required
+      api.cleanup().expect("cleanup should succeed");
     } // out of scope -> dropped
 
     assert!(manager.registrations.lock().unwrap().get("temp_plugin").is_none());
@@ -143,13 +146,15 @@ mod manager_tests {
         assert_eq!(guard.get("plugin_b").unwrap().len(), 1);
       }
 
-      drop(api_a);
+      api_a.cleanup().expect("cleanup should succeed");
 
       {
         let guard = manager.registrations.lock().unwrap();
         assert!(!guard.contains_key("plugin_a"));
         assert_eq!(guard.get("plugin_b").unwrap().len(), 1);
       }
+
+      api_b.cleanup().expect("cleanup should succeed");
     }
 
     {
