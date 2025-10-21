@@ -9,7 +9,7 @@ use crate::{
   sessions::manager::SessionManager,
   traits::{
     agent::AgentTrait, automata::AutomataTrait, bettercap::BettercapTrait, epoch::Epoch,
-    ui::ViewTrait,
+    events::EventBus, ui::ViewTrait,
   },
 };
 
@@ -53,6 +53,7 @@ pub struct CoreModules {
   pub view: Arc<dyn ViewTrait + Send + Sync>,
   pub agent: Arc<dyn AgentTrait + Send + Sync>,
   pub automata: Arc<dyn AutomataTrait + Send + Sync>,
+  pub events: Arc<dyn EventBus>,
 }
 
 #[async_trait::async_trait]

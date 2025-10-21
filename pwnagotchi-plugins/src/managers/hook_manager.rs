@@ -1,6 +1,6 @@
 use std::{any::Any, collections::HashMap, sync::Mutex};
 
-use pwnagotchi_shared::types::hooks::HookDescriptor;
+use pwnagotchi_shared::{logger::LOGGER, types::hooks::HookDescriptor};
 
 use crate::traits::hooks::{DynamicHookAPITrait, HookError};
 
@@ -35,7 +35,6 @@ impl HookManager {
 
     if let Some(handles) = handles {
       for handle in handles {
-        eprintln!("Unregistering hook: {} (ID {})", handle.hook, handle.id);
         self.unregister_hook_internal(&handle)?;
       }
     }
@@ -63,6 +62,10 @@ impl HookManager {
       HookKind::Instead => (descriptor.register_instead)(callback),
     }
     .ok_or_else(|| HookError::TypeMismatch(descriptor.name.to_string()))?;
+
+    let message = format!("Registering hook: {} (ID {})", descriptor.name, id);
+    LOGGER.log_debug("HOOKS", &message);
+    eprintln!("{}", message);
 
     Ok(StoredHook::new(descriptor.name, kind, id))
   }
@@ -102,6 +105,12 @@ impl HookManager {
       HookKind::Instead => (descriptor.unregister_instead)(handle.id),
     };
 
+    let message = format!("Unregistering hook on: {} (ID {})", handle.hook, handle.id);
+    LOGGER.log_debug("HOOKS", &message);
+    eprintln!("{}", message);
+
+    drop(handle.to_owned());
+
     if success { Ok(()) } else { Err(HookError::UnregisterFailed(handle.hook.to_string())) }
   }
 
@@ -118,8 +127,8 @@ impl Default for HookManager {
 }
 
 pub struct DynamicHookAPI<'a> {
-  manager: &'a HookManager,
-  plugin_name: String,
+  pub(crate) manager: &'a HookManager,
+  pub(crate) plugin_name: String,
   pub(crate) registered_hooks: Vec<(String, u64)>,
 }
 

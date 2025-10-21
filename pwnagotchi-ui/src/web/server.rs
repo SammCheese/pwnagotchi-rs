@@ -13,17 +13,15 @@ use axum::{
 use axum_auth::AuthBasic;
 use include_dir::{Dir, include_dir};
 use parking_lot::RwLock;
+use pwnagotchi_plugins::managers::plugin_manager::PluginManager;
 use pwnagotchi_shared::{
   config::config,
   identity::Identity,
   logger::LOGGER,
   sessions::manager::SessionManager,
-  traits::{
-    general::{Component, CoreModules, Dependencies},
-    ui::ServerTrait,
-  },
+  traits::{general::Dependencies, ui::ServerTrait},
 };
-use tokio::{sync::oneshot, task::JoinHandle};
+use tokio::sync::oneshot;
 
 use crate::web::pages::handler::{
   inbox_handler, index_handler, message_handler, new_message_handler, peers_handler,
@@ -33,44 +31,6 @@ use crate::web::pages::handler::{
 pub static TEMPLATE_ASSETS: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/assets/templates");
 pub static STATIC_ASSETS: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/assets/static");
 pub static FONT_ASSETS: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/assets/fonts");
-
-pub struct ServerComponent {
-  server: Option<Arc<dyn ServerTrait + Send + Sync>>,
-}
-
-impl Dependencies for ServerComponent {
-  fn name(&self) -> &'static str {
-    "WebUIComponent"
-  }
-
-  fn dependencies(&self) -> &[&str] {
-    &["SessionManager", "Identity"]
-  }
-}
-
-#[async_trait::async_trait]
-impl Component for ServerComponent {
-  async fn init(&mut self, ctx: &CoreModules) -> Result<()> {
-    let (sm, identity) = (&ctx.session_manager, &ctx.identity);
-    let sm = Arc::clone(sm);
-    let identity = Arc::clone(identity);
-    self.server = Some(Arc::new(Server::new(sm, identity)));
-    Ok(())
-  }
-
-  async fn start(&self) -> Result<Option<JoinHandle<()>>> {
-    if let Some(server) = &self.server {
-      let server = Arc::clone(server);
-      let handle = tokio::spawn(async move {
-        server.start_server().await.unwrap_or_else(|e| {
-          LOGGER.log_error("Server", &format!("Failed to start server: {e}"));
-        });
-      });
-      return Ok(Some(handle));
-    }
-    Ok(None)
-  }
-}
 
 impl Dependencies for Server {
   fn name(&self) -> &'static str {
@@ -82,29 +42,16 @@ impl Dependencies for Server {
   }
 }
 
-impl Default for ServerComponent {
-  fn default() -> Self {
-    Self::new()
-  }
-}
-
-impl ServerComponent {
-  #[must_use]
-  pub fn new() -> Self {
-    Self { server: None }
-  }
-}
-
 #[derive(Clone)]
 #[allow(dead_code)]
 pub struct WebUIState {
   pub sm: Arc<SessionManager>,
   pub identity: Arc<RwLock<Identity>>,
+  pub pluginmanager: Arc<RwLock<PluginManager>>,
 }
 
 pub struct Server {
-  pub sm: Arc<SessionManager>,
-  pub identity: Arc<RwLock<Identity>>,
+  pub router: Router,
   pub address: Cow<'static, str>,
   pub port: u16,
   #[allow(dead_code)]
@@ -114,22 +61,37 @@ pub struct Server {
 #[async_trait::async_trait]
 impl ServerTrait for Server {
   async fn start_server(&self) -> Result<(), String> {
+    self.start_server().await
+  }
+
+  async fn stop_server(&self) {}
+}
+
+impl Server {
+  #[must_use]
+  pub fn new(router: Router) -> Self {
+    let cfg = &config().ui.web;
+    Self {
+      router,
+      address: cfg.address.clone(),
+      port: cfg.port,
+      shutdown_tx: None,
+    }
+  }
+
+  pub async fn start_server(&self) -> Result<(), String> {
     if self.address.is_empty() {
       LOGGER.log_info("Server", "Couldn't get IP of USB0, video server not starting");
       return Err("Couldn't get IP of USB0, video server not starting".into());
     }
 
-    let sm = Arc::clone(&self.sm);
-    let identity = Arc::clone(&self.identity);
-
-    let app = build_router(sm, identity);
-
     let addr = format!("{}:{}", self.address, self.port);
+    let router = self.router.clone();
 
     tokio::spawn(async move {
       match tokio::net::TcpListener::bind(&addr).await {
         Ok(listener) => {
-          if let Err(e) = axum::serve(listener, app).await {
+          if let Err(e) = axum::serve(listener, router).await {
             LOGGER.log_error("Server", &format!("Failed to serve: {e}"));
           }
         }
@@ -139,22 +101,6 @@ impl ServerTrait for Server {
       }
     });
     Ok(())
-  }
-
-  async fn stop_server(&self) {}
-}
-
-impl Server {
-  #[must_use]
-  pub fn new(sm: Arc<SessionManager>, identity: Arc<RwLock<Identity>>) -> Self {
-    let cfg = &config().ui.web;
-    Self {
-      sm,
-      identity,
-      address: cfg.address.clone(),
-      port: cfg.port,
-      shutdown_tx: None,
-    }
   }
 }
 
@@ -194,8 +140,13 @@ fn compare_safely(a: &str, b: &str) -> bool {
   diff == 0
 }
 
-pub fn build_router(sm: Arc<SessionManager>, identity: Arc<RwLock<Identity>>) -> Router {
-  let state = Arc::new(WebUIState { sm, identity });
+pub fn build_router(
+  sm: Arc<SessionManager>,
+  identity: Arc<RwLock<Identity>>,
+  pluginmanager: Arc<RwLock<PluginManager>>,
+) -> Router {
+  let state = Arc::new(WebUIState { sm, identity, pluginmanager });
+
   Router::new()
     .layer(middleware::from_fn(basic_auth_middleware))
     // Template routes

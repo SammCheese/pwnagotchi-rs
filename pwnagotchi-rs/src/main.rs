@@ -26,16 +26,18 @@ use pwnagotchi_shared::{
     automata::AutomataTrait,
     bettercap::BettercapTrait,
     epoch::Epoch,
+    events::EventBus,
     general::{Component, CoreModules},
     ui::ViewTrait,
   },
+  types::events::EventPayload,
 };
 use pwnagotchi_ui::{
   ui::{
     refresher::RefresherComponent,
     view::{View, ViewComponent},
   },
-  web::server::ServerComponent,
+  web::server::{Server, build_router},
 };
 
 #[derive(Parser, Debug)]
@@ -95,11 +97,80 @@ async fn main() -> anyhow::Result<()> {
     exit(EXIT_SUCCESS);
   }
 
-  let mut plugin_manager = PluginManager::new();
+  // Create Managers
+  let plugin_manager_inner = PluginManager::new();
+  let event_bus = plugin_manager_inner.event_bus();
+  let plugin_manager = Arc::new(RwLock::new(plugin_manager_inner));
+  let mut component_manager = ComponentManager::new();
 
-  plugin_manager.init();
-  plugin_manager.load_plugins();
+  // Build CoreModules
+  let core_modules = build_coremodules(event_bus.clone());
 
+  // Set CoreModules for Components
+  component_manager.set_core_modules(Arc::clone(&core_modules));
+
+  // Initialize Plugins
+  plugin_manager.write().init();
+  plugin_manager.write().set_core_modules(Arc::clone(&core_modules));
+  plugin_manager.write().load_plugins();
+  plugin_manager.write().initialize_plugins();
+
+  // Immediately emit starting plugin event
+  let event = Arc::clone(&core_modules.events);
+  tokio::task::spawn(async move {
+    let _ = event.emit_payload("starting", EventPayload::empty()).await;
+  });
+
+  // Build Router and Start WebServer
+  let router = build_router(
+    Arc::clone(&core_modules.session_manager),
+    Arc::clone(&core_modules.identity),
+    Arc::clone(&plugin_manager),
+  );
+  tokio::task::spawn(async move {
+    let _ = Server::new(router).start_server().await;
+  });
+
+  LOGGER.log_debug("Pwnagotchi", "Loading Components");
+
+  let components: Vec<Box<dyn Component + Send + Sync>> = vec![
+    Box::new(IdentityComponent::new()),
+    Box::new(BettercapComponent::new()),
+    Box::new(EventListenerComponent::new()),
+    Box::new(ViewComponent::new()),
+    Box::new(AgentComponent::new()),
+    Box::new(AutomataComponent::new()),
+    Box::new(AdvertiserComponent::new()),
+    Box::new(RefresherComponent::new()),
+    Box::new(SetupComponent::new()),
+  ];
+
+  for component in components {
+    component_manager.register(component);
+  }
+
+  let _ = component_manager.init_all().await;
+  let _ = component_manager.start_all().await;
+
+  let plug_manager = Arc::clone(&plugin_manager);
+
+  // Cli Routines have to go last ALWAYS
+  let mut cli = CliComponent::new(cli.manual);
+
+  let _ = cli.init(&Arc::clone(&core_modules)).await;
+  let _ = cli.start().await;
+
+  tokio::select! {
+    _ = tokio::signal::ctrl_c() => {
+      LOGGER.log_info("Pwnagotchi", "Shutting down...");
+      let _ = plug_manager.write().shutdown_all();
+      component_manager.shutdown().await;
+    },
+  }
+  Ok(())
+}
+
+fn build_coremodules(events: Arc<dyn EventBus>) -> Arc<CoreModules> {
   let identity = Arc::new(RwLock::new(Identity::new()));
   let session_manager = Arc::new(SessionManager::new());
   let epoch = Arc::new(RwLock::new(Epoch::new()));
@@ -108,6 +179,7 @@ async fn main() -> anyhow::Result<()> {
   let view = Arc::new(View::new(Arc::clone(&epoch))) as Arc<dyn ViewTrait + Send + Sync>;
   let automata = Arc::new(Automata::new(
     Arc::clone(&epoch),
+    Arc::clone(&events),
     Arc::clone(&view) as Arc<dyn ViewTrait + Send + Sync>,
   )) as Arc<dyn AutomataTrait + Send + Sync>;
 
@@ -119,7 +191,7 @@ async fn main() -> anyhow::Result<()> {
     Arc::clone(&session_manager),
   )) as Arc<dyn AgentTrait + Send + Sync>;
 
-  let core_modules = Arc::new(CoreModules {
+  Arc::new(CoreModules {
     session_manager: Arc::clone(&session_manager),
     identity: Arc::clone(&identity),
     epoch: Arc::clone(&epoch),
@@ -127,63 +199,8 @@ async fn main() -> anyhow::Result<()> {
     view: Arc::clone(&view),
     agent: Arc::clone(&agent),
     automata: Arc::clone(&automata),
-  });
-
-  // Provide core modules to plugin manager so plugins can use them during
-  // initialization
-  plugin_manager.set_coremodules(Arc::clone(&core_modules));
-  plugin_manager.initialize_plugins();
-
-  LOGGER.log_debug("Pwnagotchi", "Loading Components");
-
-  let mut manager = ComponentManager::new(Arc::clone(&core_modules));
-
-  let components: Vec<Box<dyn Component + Send + Sync>> = vec![
-    Box::new(IdentityComponent::new()),
-    Box::new(BettercapComponent::new()),
-    Box::new(EventListenerComponent::new()),
-    Box::new(ViewComponent::new()),
-    Box::new(AgentComponent::new()),
-    Box::new(AutomataComponent::new()),
-    Box::new(ServerComponent::new()),
-    Box::new(AdvertiserComponent::new()),
-    Box::new(RefresherComponent::new()),
-    Box::new(SetupComponent::new()),
-  ];
-
-  for component in components {
-    manager.register(component);
-  }
-
-  if let Err(e) = manager.init_all().await {
-    LOGGER.log_error("ComponentManager", &format!("Failed to initialize components: {e}"));
-    exit(1);
-  }
-
-  if let Err(e) = manager.start_all().await {
-    LOGGER.log_error("ComponentManager", &format!("Failed to start components: {e}"));
-  }
-
-  // Cli Routines have to go last ALWAYS
-  let mut cli = CliComponent::new(cli.manual);
-  if let Err(e) = cli.init(&Arc::clone(&core_modules)).await {
-    LOGGER.log_error("ComponentManager", &format!("Failed to initialize CLI component: {e}"));
-    exit(1);
-  }
-  if let Err(e) = cli.start().await {
-    LOGGER.log_error("ComponentManager", &format!("Failed to start CLI component: {e}"));
-    exit(1);
-  }
-
-  tokio::signal::ctrl_c().await?;
-
-  LOGGER.log_info("Pwnagotchi", "Shutting down...");
-
-  let _ = plugin_manager.shutdown_all();
-
-  manager.shutdown().await;
-
-  Ok(())
+    events,
+  })
 }
 
 pub const fn version() -> &'static str {

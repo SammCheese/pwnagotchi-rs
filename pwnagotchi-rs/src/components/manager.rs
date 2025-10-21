@@ -69,29 +69,54 @@ impl Dependencies for CoreModuleAsDeps<'_> {
 
 pub struct ComponentManager {
   components: Vec<BoxedComponent>,
-  ctx: Arc<CoreModules>,
+  ctx: Option<Arc<CoreModules>>,
   join_handles: Vec<(String, JoinHandle<()>)>,
 }
 
+impl Default for ComponentManager {
+  fn default() -> Self {
+    Self::new()
+  }
+}
+
 impl ComponentManager {
-  pub fn new(ctx: Arc<CoreModules>) -> Self {
+  pub fn new() -> Self {
     Self {
       components: Vec::new(),
-      ctx,
+      ctx: None,
       join_handles: Vec::new(),
     }
+  }
+
+  pub fn set_core_modules(&mut self, ctx: Arc<CoreModules>) {
+    self.ctx = Some(ctx);
   }
 
   pub fn register(&mut self, component: Box<dyn Component + Send + Sync>) {
     self.components.push(component);
   }
 
+  /// # Panics
+  /// This function will panic if `self.ctx` is `None` when calling `unwrap()`.
   pub async fn init_all(&mut self) -> Result<()> {
-    let order = sort_by_deps(&components_as_dependencies(&self.components), &self.ctx)?;
+    if self.ctx.is_none() {
+      return Err(anyhow!("CoreModules not set in ComponentManager"));
+    }
+
+    let order =
+      sort_by_deps(&components_as_dependencies(&self.components), self.ctx.as_ref().unwrap())?;
     for idx in order {
       let comp = &mut self.components[idx];
-      LOGGER.log_info("Pwnagotchi", &format!("Initializing component {}", comp.name()));
-      comp.init(&self.ctx).await?;
+      LOGGER.log_debug("Pwnagotchi", &format!("Initializing component {}", comp.name()));
+
+      match comp.init(self.ctx.as_ref().unwrap()).await {
+        Ok(()) => {}
+        Err(e) => {
+          let msg = format!("Failed to initialize component {}: {}", comp.name(), e);
+          LOGGER.log_error("Pwnagotchi", &msg);
+          return Err(anyhow!(msg));
+        }
+      }
     }
 
     LOGGER.log_info(
@@ -99,7 +124,7 @@ impl ComponentManager {
       &format!(
         "Pwnagotchi {}@{} (v{}) starting...",
         config().main.name,
-        &self.ctx.identity.read().fingerprint(),
+        &self.ctx.as_ref().unwrap().identity.read().fingerprint(),
         env!("CARGO_PKG_VERSION")
       ),
     );
@@ -107,22 +132,41 @@ impl ComponentManager {
     Ok(())
   }
 
+  /// # Panics
+  /// This function will panic if `self.ctx` is `None` when calling `unwrap()`.
   pub async fn start_all(&mut self) -> Result<()> {
-    let order = sort_by_deps(&components_as_dependencies(&self.components), &self.ctx)?;
+    if self.ctx.is_none() {
+      return Err(anyhow!("CoreModules not set in ComponentManager"));
+    }
+    let order =
+      sort_by_deps(&components_as_dependencies(&self.components), self.ctx.as_ref().unwrap())?;
     for idx in order {
       let comp = &self.components[idx];
-      LOGGER.log_info("Pwnagotchi", &format!("Starting component {}", comp.name()));
-      if let Some(handle) = comp.start().await? {
-        self.join_handles.push((comp.name().to_string(), handle));
+      LOGGER.log_debug("Pwnagotchi", &format!("Starting component {}", comp.name()));
+
+      match comp.start().await {
+        Ok(Some(handle)) => {
+          self.join_handles.push((comp.name().to_string(), handle));
+        }
+        Ok(None) => {}
+        Err(e) => {
+          let msg = format!("Failed to start component {}: {}", comp.name(), e);
+          LOGGER.log_error("Pwnagotchi", &msg);
+          return Err(anyhow!(msg));
+        }
       }
     }
     Ok(())
   }
 
+  /// # Panics
+  /// This function will panic if `self.ctx` is `None` when calling `unwrap()`.
   pub async fn shutdown(&mut self) {
-    LOGGER.log_info("Pwnagotchi", "Shutting down components...");
+    LOGGER.log_debug("Pwnagotchi", "Shutting down components...");
 
-    if let Ok(mut order) = sort_by_deps(&components_as_dependencies(&self.components), &self.ctx) {
+    if let Ok(mut order) =
+      sort_by_deps(&components_as_dependencies(&self.components), self.ctx.as_ref().unwrap())
+    {
       order.reverse();
       for idx in order {
         let comp = &self.components[idx];
@@ -132,7 +176,7 @@ impl ComponentManager {
 
     // cancel/join handles
     for (name, handle) in self.join_handles.drain(..) {
-      LOGGER.log_info("Pwnagotchi", &format!("Stopping background task for component {name}"));
+      LOGGER.log_debug("Pwnagotchi", &format!("Stopping background task for component {name}"));
       handle.abort();
       let _ = handle.await;
     }

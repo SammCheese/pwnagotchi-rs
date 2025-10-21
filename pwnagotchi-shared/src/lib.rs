@@ -9,6 +9,7 @@ pub mod traits {
   pub mod automata;
   pub mod bettercap;
   pub mod epoch;
+  pub mod events;
   pub mod general;
   pub mod logger;
   pub mod plugins;
@@ -17,6 +18,7 @@ pub mod traits {
 
 pub mod types {
   pub mod epoch;
+  pub mod events;
   pub mod hooks;
   pub mod ui;
 }

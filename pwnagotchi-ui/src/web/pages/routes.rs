@@ -32,6 +32,7 @@ pub struct Message {
 #[derive(Clone, Default)]
 pub struct PluginCtx {
   pub name: String,
+  pub version: String,
   pub description: Option<String>,
   pub has_webhook: bool,
   pub enabled: bool,

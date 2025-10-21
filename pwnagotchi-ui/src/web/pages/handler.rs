@@ -6,13 +6,14 @@ use axum::{
   http::{StatusCode, header},
   response::{Html, IntoResponse, Response},
 };
+use pwnagotchi_plugins::managers::plugin_manager::PluginState;
 use pwnagotchi_shared::{config::config, models::agent::RunningMode};
 
 use crate::web::{
   frame::FRAME_PATH,
   pages::routes::{
     BaseCtx, InboxCtx, InboxTemplate, IndexTemplate, Message, MessageTemplate, NavItem,
-    NewMessageTemplate, PeersTemplate, PluginsTemplate, ProfileTemplate, StatusTemplate,
+    NewMessageTemplate, PeersTemplate, PluginCtx, PluginsTemplate, ProfileTemplate, StatusTemplate,
   },
   server::WebUIState,
 };
@@ -76,10 +77,26 @@ pub async fn profile_handler(State(state): State<Arc<WebUIState>>) -> impl IntoR
   }
 }
 
-pub async fn plugins_handler(State(_state): State<Arc<WebUIState>>) -> impl IntoResponse {
+pub async fn plugins_handler(State(state): State<Arc<WebUIState>>) -> impl IntoResponse {
+  let handle = state.pluginmanager.write();
+  let plugins = handle.get_plugins();
+
+  let plugins: Vec<PluginCtx> = plugins
+    .iter()
+    .map(|p| PluginCtx {
+      name: p.plugin.info().name.to_string(),
+      description: Some(p.plugin.info().description.to_string()),
+      version: p.plugin.info().version.to_string(),
+      enabled: matches!(p.state, PluginState::Initialized),
+      has_webhook: p.plugin.webhook().is_some(),
+    })
+    .collect();
+
+  drop(handle);
+
   let tpl = PluginsTemplate {
     base: make_base("Plugins", "plugins"),
-    plugins: vec![],
+    plugins,
     csrf_token: String::new(),
   };
   match tpl.render() {

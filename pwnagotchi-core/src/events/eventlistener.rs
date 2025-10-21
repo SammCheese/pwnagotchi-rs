@@ -10,6 +10,7 @@ use pwnagotchi_shared::{
   traits::{
     bettercap::{BettercapCommand, BettercapTrait},
     epoch::Epoch,
+    events::{EventBus, emit_serialized},
     general::{Component, CoreModules, Dependencies},
     ui::ViewTrait,
   },
@@ -60,7 +61,8 @@ impl Component for EventListenerComponent {
     let epoch = Arc::clone(epoch);
     let bettercap = Arc::clone(bc);
     let view = Arc::clone(view);
-    let eventlistener = EventListener::new(sm, bettercap, epoch, view);
+    let events = Arc::clone(&ctx.events);
+    let eventlistener = EventListener::new(sm, bettercap, epoch, view, events);
     self.eventlistener = Some(Arc::new(eventlistener));
 
     Ok(())
@@ -71,7 +73,7 @@ impl Component for EventListenerComponent {
       LOGGER.log_info("Agent", "Starting EventListener component");
       let ev = Arc::clone(ev);
       let handle = tokio::spawn(async move {
-        start_event_loop(&ev.sm, &ev.bettercap, &ev.epoch, &ev.view).await;
+        start_event_loop(&ev.sm, &ev.bettercap, &ev.epoch, &ev.view, &ev.events).await;
       });
       return Ok(Some(handle));
     }
@@ -84,6 +86,7 @@ pub struct EventListener {
   bettercap: Arc<dyn BettercapTrait + Send + Sync>,
   epoch: Arc<RwLock<Epoch>>,
   view: Arc<dyn ViewTrait + Send + Sync>,
+  events: Arc<dyn EventBus>,
 }
 
 impl EventListener {
@@ -92,8 +95,9 @@ impl EventListener {
     bettercap: Arc<dyn BettercapTrait + Send + Sync>,
     epoch: Arc<RwLock<Epoch>>,
     view: Arc<dyn ViewTrait + Send + Sync>,
+    events: Arc<dyn EventBus>,
   ) -> Self {
-    Self { sm, bettercap, epoch, view }
+    Self { sm, bettercap, epoch, view, events }
   }
 }
 
@@ -102,6 +106,7 @@ pub async fn start_event_loop(
   bc: &Arc<dyn BettercapTrait + Send + Sync>,
   epoch: &Arc<RwLock<Epoch>>,
   view: &Arc<dyn ViewTrait + Send + Sync>,
+  events: &Arc<dyn EventBus>,
 ) {
   LOGGER.log_info("Agent", "Starting event loop");
   let (tx, mut rx) = tokio::sync::mpsc::channel::<String>(1000);
@@ -131,6 +136,7 @@ pub async fn start_event_loop(
 
   let view = Arc::clone(view);
   let epoch = Arc::clone(epoch);
+  let events = Arc::clone(events);
   let (ev_tx, mut ev_rx) = mpsc::channel::<(String, String)>(100);
   tokio::spawn(async move {
     while let Some(msg) = rx.recv().await {
@@ -153,6 +159,10 @@ pub async fn start_event_loop(
     if tag == "wifi.client.handshake" {
       let json = serde_json::from_str::<Value>(&msg).unwrap_or(Value::Null);
       handle_handshake_event(&json, sm, &view, &epoch).await;
+
+      if let Err(err) = emit_serialized(events.as_ref(), "handshake", &json).await {
+        LOGGER.log_error("EVENTS", &format!("Failed to emit 'handshake' event: {err}"));
+      }
     }
   }
 }

@@ -17,8 +17,6 @@ impl BettercapCommand {
     S: 'static + AsRef<str>,
   {
     let tx = respond_to.unwrap_or_else(|| {
-      // Create a channel but immediately drop the receiver for fire-and-forget
-      // commands
       let (tx, rx) = tokio::sync::oneshot::channel();
       drop(rx);
       tx
@@ -26,7 +24,6 @@ impl BettercapCommand {
     Self::Run { cmd: cmd.as_ref().into(), respond_to: tx }
   }
 
-  /// Create a fire-and-forget command that doesn't wait for response
   pub fn run_fire_and_forget<S>(cmd: S) -> Self
   where
     S: 'static + AsRef<str>,

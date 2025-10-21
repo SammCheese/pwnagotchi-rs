@@ -1,34 +1,54 @@
-use std::{collections::HashMap, error::Error, sync::Arc};
+use std::{
+  error::Error,
+  panic::{AssertUnwindSafe, catch_unwind},
+  sync::Arc,
+};
 
-use pwnagotchi_shared::{config::config, logger::LOGGER, traits::general::CoreModules};
+use pwnagotchi_shared::{
+  logger::LOGGER,
+  traits::{events::EventBus, general::CoreModules},
+  types::events::EventPayload,
+};
 
 use crate::{
   loaders::rust::RustPluginLoader,
-  managers::hook_manager::HookManager,
+  managers::{event_manager::EventManager, hook_manager::HookManager},
   traits::{loaders::PluginLoader, plugins::Plugin},
 };
 
+pub fn safe_call<F>(plugin: &mut dyn Plugin, f: F) -> Result<(), Box<dyn Error>>
+where
+  F: FnOnce(&mut dyn Plugin) -> Result<(), Box<dyn Error>>,
+{
+  match catch_unwind(AssertUnwindSafe(|| f(plugin))) {
+    Ok(Ok(())) => Ok(()),
+    Ok(Err(e)) => Err(e),
+    Err(_) => Err("Plugin panicked".into()),
+  }
+}
+
 #[derive(PartialEq, Eq, Hash, Debug, Clone, Copy)]
-enum PluginState {
+pub enum PluginState {
   Registered,
   Initialized,
   Failed,
   Disabled,
+  Unloaded,
 }
 
 pub struct PluginEntry {
-  plugin: Box<dyn Plugin>,
+  pub plugin: Box<dyn Plugin>,
   #[allow(dead_code)]
-  id: String,
-  state: PluginState,
-  error: Option<String>,
+  pub id: String,
+  pub state: PluginState,
+  pub error: Option<String>,
 }
 
 pub struct PluginManager {
-  plugins: HashMap<String, PluginEntry>,
   loaders: Vec<Box<dyn PluginLoader>>,
   core_modules: Option<Arc<CoreModules>>,
-  hook_manager: HookManager,
+  hook_manager: Arc<HookManager>,
+  event_manager: Arc<EventManager>,
 }
 
 impl Default for PluginManager {
@@ -40,16 +60,28 @@ impl Default for PluginManager {
 impl PluginManager {
   pub fn new() -> Self {
     PluginManager {
-      plugins: HashMap::new(),
-      hook_manager: HookManager::new(),
+      hook_manager: Arc::new(HookManager::new()),
+      event_manager: Arc::new(EventManager::new()),
       core_modules: None,
       loaders: Vec::new(),
     }
   }
 
+  pub fn event_bus(&self) -> Arc<dyn EventBus> {
+    Arc::clone(&self.event_manager) as Arc<dyn EventBus>
+  }
+
   pub fn init(&mut self) {
     println!("Initializing Plugin Manager...");
-    self.loaders.push(Box::new(RustPluginLoader::new()));
+
+    self.loaders.push(Box::new(RustPluginLoader::new(
+      Arc::clone(&self.hook_manager),
+      Arc::clone(&self.event_manager),
+    )));
+  }
+
+  pub fn set_core_modules(&mut self, core: Arc<CoreModules>) {
+    self.core_modules = Some(core);
   }
 
   pub fn reload_plugin(&mut self, _name: &str) -> Result<(), Box<dyn Error>> {
@@ -57,177 +89,59 @@ impl PluginManager {
   }
 
   pub fn load_plugins(&mut self) {
-    let mut to_register = Vec::new();
-
     for loader in &mut self.loaders {
       // Command Loader to Load Plugins
-      loader.load_plugins();
-
-      // Hand Plugins over to Manager
-      let plugins = loader.take_plugins();
-
-      for plugin in plugins {
-        if self.plugins.contains_key(plugin.info().name) {
-          eprintln!("Plugin '{}' is already loaded, skipping.", plugin.info().name);
-          continue;
-        }
-        to_register.push((plugin.info().name.to_string(), plugin));
-      }
+      let _ = loader.load_plugins();
     }
 
-    for (name, plugin) in to_register {
-      // Unless directly set as disabled, enable
-      let state = if let Some(pc) = config().plugins.get(&name)
-        && !pc.enabled
-      {
-        PluginState::Disabled
-      } else {
-        PluginState::Registered
-      };
-      self.register_plugin(name, plugin, Some(state));
-    }
-
-    println!("Total plugins loaded: {}", self.plugins.len());
+    let total_plugins: usize = self.loaders.iter().map(|l| l.get_plugins().len()).sum();
+    println!("Loaded {} plugins.", total_plugins);
   }
 
-  pub fn toggle_plugin(&mut self, name: &str) -> Result<(), Box<dyn Error>> {
-    if let Some(entry) = self.plugins.get(name) {
-      if entry.state == PluginState::Initialized {
-        self.disable_plugin(name)
-      } else {
-        self.enable_plugin(name)
-      }
-    } else {
-      Err(format!("Plugin '{}' not found", name).into())
-    }
-  }
-
-  pub fn set_coremodules(&mut self, core: Arc<CoreModules>) {
-    self.core_modules = Some(core);
+  pub fn get_plugins(&self) -> Vec<&PluginEntry> {
+    self
+      .loaders
+      .iter()
+      .flat_map(|loader| loader.get_plugins().iter().map(|b| &**b))
+      .collect()
   }
 
   pub fn initialize_plugins(&mut self) {
-    let plugin_names: Vec<String> = self
-      .plugins
-      .iter()
-      .filter(|(_, entry)| entry.state == PluginState::Registered)
-      .map(|(name, _)| name.clone())
-      .collect();
-
-    let mut failed = Vec::new();
-
-    for name in plugin_names {
-      if let Some(entry) = self.plugins.get_mut(&name) {
-        if self.core_modules.is_none() {
-          LOGGER.log_error("PLUGIN", "CoreModules not set, cannot initialize plugins.");
-          eprintln!("CoreModules not set, cannot initialize plugins.");
-          entry.state = PluginState::Failed;
-          entry.error = Some("CoreModules not set".to_string());
-          failed.push(name.clone());
-          continue;
-        }
-
-        let core = Arc::clone(self.core_modules.as_ref().unwrap());
-        let mut scoped_api = self.hook_manager.scope(&name);
-
-        match entry.plugin.on_load(&mut scoped_api, core) {
-          Ok(_) => {
-            entry.state = PluginState::Initialized;
-            LOGGER.log_debug("PLUGINS", &format!("Plugin '{}' initialized successfully.", name));
-          }
-          Err(e) => {
-            if let Err(hook_err) = self.hook_manager.unregister_plugin(&name) {
-              LOGGER.log_error(
-              "PLUGIN",
-              &format!("Failed to unregister hooks for plugin '{name}': {hook_err}! EXPECT UNPREDICTABLE BEHAVIOR!"),
-            );
-
-              eprintln!(
-                "Failed to unregister hooks for plugin '{name}': {hook_err}! EXPECT UNPREDICTABLE BEHAVIOR!"
-              );
-            }
-            LOGGER.log_error("PLUGIN", &format!("Failed to start plugin '{name}': {e}"));
-            eprintln!("Failed to start plugin '{name}': {e}");
-            entry.state = PluginState::Failed;
-            entry.error = Some(e.to_string());
-            failed.push(name.clone());
-          }
-        }
-      }
+    if self.core_modules.is_none() {
+      LOGGER.log_error("PLUGIN", "CoreModules not set, cannot initialize plugins.");
+      eprintln!("CoreModules not set, cannot initialize plugins.");
+      return;
     }
-  }
 
-  fn register_plugin(&mut self, name: String, plugin: Box<dyn Plugin>, state: Option<PluginState>) {
-    let state = state.unwrap_or(PluginState::Disabled);
-    self.plugins.insert(
-      name,
-      PluginEntry {
-        plugin,
-        id: uuid::Uuid::new_v4().to_string(),
-        state,
-        error: None,
-      },
-    );
-  }
-
-  fn unregister_plugin(&mut self, name: &str) -> Result<Option<Box<dyn Plugin>>, Box<dyn Error>> {
-    self.hook_manager.unregister_plugin(name)?;
-    if let Some(mut entry) = self.plugins.remove(name) {
-      entry.plugin.on_unload()?;
-      Ok(Some(entry.plugin))
-    } else {
-      Err(format!("Plugin '{}' not found", name).into())
+    for loader in self.loaders.iter_mut() {
+      let _ = loader.init_all(Arc::clone(self.core_modules.as_ref().unwrap()));
     }
+
+    let event = Arc::clone(&self.event_manager);
+    tokio::spawn(async move {
+      let _ = event.emit_payload_native("plugin::init", EventPayload::empty()).await;
+    });
   }
 
-  pub fn enable_plugin(&mut self, name: &str) -> Result<(), Box<dyn Error>> {
-    if let Some(entry) = self.plugins.get_mut(name) {
-      if self.core_modules.is_none() {
-        LOGGER.log_error("PLUGIN", "CoreModules not set, cannot initialize plugins.");
-        eprintln!("CoreModules not set, cannot initialize plugins.");
-        entry.state = PluginState::Failed;
-        entry.error = Some("CoreModules not set".to_string());
-        return Err("CoreModules not set".into());
-      }
-
-      let mut scoped_api = self.hook_manager.scope(name);
-      let core = Arc::clone(self.core_modules.as_ref().unwrap());
-      match entry.plugin.on_load(&mut scoped_api, core) {
-        Ok(_) => {
-          entry.state = PluginState::Initialized;
-          Ok(())
-        }
-        Err(e) => {
-          let _ = self.hook_manager.unregister_plugin(name);
-          entry.state = PluginState::Failed;
-          entry.error = Some(e.to_string());
-          LOGGER.log_error("PLUGIN", &format!("Failed to start plugin '{}': {}", name, e));
-          Err(format!("Failed to start plugin '{}': {}", name, e).into())
-        }
-      }
-    } else {
-      Err(format!("Plugin '{}' not found", name).into())
-    }
+  pub fn enable_plugin(
+    &mut self,
+    loader: &mut dyn PluginLoader,
+    name: &str,
+  ) -> Result<(), Box<dyn Error>> {
+    loader.enable_plugin(name)
   }
 
-  pub fn disable_plugin(&mut self, name: &str) -> Result<(), Box<dyn Error>> {
-    if let Some(entry) = self.plugins.get_mut(name) {
-      entry.plugin.on_unload()?;
-      self.hook_manager.unregister_plugin(name)?;
-      entry.state = PluginState::Disabled;
-      Ok(())
-    } else {
-      Err(format!("Plugin '{}' not found", name).into())
-    }
-  }
-
-  pub fn get_plugin(&self, name: &str) -> Option<&dyn Plugin> {
-    self.plugins.get(name).map(|boxed| boxed.plugin.as_ref())
+  pub fn disable_plugin(
+    &mut self,
+    loader: &mut dyn PluginLoader,
+    name: &str,
+  ) -> Result<(), Box<dyn Error>> {
+    loader.disable_plugin(name)
   }
 
   pub fn shutdown_all(&mut self) -> Result<(), Box<dyn Error>> {
-    for name in self.plugins.keys().cloned().collect::<Vec<_>>() {
-      let _ = self.unregister_plugin(&name);
+    for loader in &mut self.loaders {
+      loader.unload_all()?;
     }
     Ok(())
   }

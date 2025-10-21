@@ -20,7 +20,10 @@ use pwnagotchi_shared::{
   },
 };
 use tokio::{sync::broadcast, task::JoinHandle};
-use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
+use tokio_tungstenite::{
+  connect_async,
+  tungstenite::{client::IntoClientRequest, protocol::Message},
+};
 use ureq::{
   Agent, Body, SendBody,
   http::{Request, Response, header::HeaderValue},
@@ -153,14 +156,10 @@ fn bettercap_add_authorization(
 ) -> Result<Response<Body>, ureq::Error> {
   let username = config().bettercap.username.to_string();
   let password = config().bettercap.password.to_string();
-  req.headers_mut().insert(
-    "Authorization",
-    HeaderValue::from_str(&format!(
-      "Basic {}",
-      general_purpose::STANDARD.encode(format!("{username}:{password}"))
-    ))
-    .unwrap(),
-  );
+  let b64 = general_purpose::STANDARD.encode(format!("{username}:{password}"));
+  req
+    .headers_mut()
+    .insert("Authorization", HeaderValue::from_str(&format!("Basic {b64}")).unwrap());
   next.handle(req)
 }
 
@@ -244,8 +243,17 @@ impl Bettercap {
 
     LOGGER.log_info("Bettercap", "Connecting to Event WebSocket");
 
+    // Prepare authorization header value
+    let auth_header = format!(
+      "Basic {}",
+      general_purpose::STANDARD.encode(format!("{}:{}", self.username, self.password))
+    );
+
     loop {
-      match connect_async(&ws_url).await {
+      let mut req = ws_url.clone().into_client_request().unwrap();
+      req.headers_mut().insert("Authorization", auth_header.parse().unwrap());
+
+      match connect_async(req).await {
         Ok((ws_stream, _)) => {
           self.is_ready.store(true, Ordering::SeqCst);
           LOGGER.log_info("Bettercap", "Event WebSocket connected");

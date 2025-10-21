@@ -9,10 +9,11 @@ use pwnagotchi_shared::{
   traits::{
     automata::AutomataTrait,
     epoch::Epoch,
+    events::EventBus,
     general::{Component, CoreModule, CoreModules, Dependencies},
     ui::ViewTrait,
   },
-  types::epoch::Activity,
+  types::{epoch::Activity, events::EventPayload},
   utils::general::has_support_network_for,
 };
 use tokio::task::JoinHandle;
@@ -36,7 +37,6 @@ impl Component for AutomataComponent {
   }
 
   async fn start(&self) -> Result<Option<JoinHandle<()>>> {
-    LOGGER.log_info("Personality", "Starting Automata component");
     Ok(None)
   }
 }
@@ -65,12 +65,17 @@ impl CoreModule for Automata {
 
 pub struct Automata {
   pub epoch: Arc<RwLock<Epoch>>,
+  pub eventbus: Arc<dyn EventBus>,
   pub view: Arc<dyn ViewTrait + Send + Sync>,
 }
 
 impl Automata {
-  pub const fn new(epoch: Arc<RwLock<Epoch>>, view: Arc<dyn ViewTrait + Send + Sync>) -> Self {
-    Self { epoch, view }
+  pub const fn new(
+    epoch: Arc<RwLock<Epoch>>,
+    eventbus: Arc<dyn EventBus>,
+    view: Arc<dyn ViewTrait + Send + Sync>,
+  ) -> Self {
+    Self { epoch, eventbus, view }
   }
 }
 
@@ -98,7 +103,10 @@ impl AutomataTrait for Automata {
   }
 
   fn set_ready(&self) {
-    //plugins.on('ready')
+    let event = Arc::clone(&self.eventbus);
+    tokio::task::spawn(async move {
+      let _ = event.emit_payload("ready", EventPayload::empty()).await;
+    });
   }
 
   fn in_good_mood(&self) -> bool {

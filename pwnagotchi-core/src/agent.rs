@@ -22,10 +22,11 @@ use pwnagotchi_shared::{
     automata::AutomataTrait,
     bettercap::{BettercapCommand, BettercapTrait},
     epoch::Epoch,
+    events::EventBus,
     general::{Component, CoreModule, CoreModules, Dependencies},
     ui::ViewTrait,
   },
-  types::epoch::Activity,
+  types::{epoch::Activity, events::EventPayload},
 };
 use serde::{Deserialize, Serialize};
 use tokio::task::JoinHandle;

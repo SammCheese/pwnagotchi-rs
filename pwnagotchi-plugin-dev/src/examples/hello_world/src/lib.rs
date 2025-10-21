@@ -1,10 +1,11 @@
 use std::{error::Error, sync::Arc};
 
 use pwnagotchi_plugins::traits::{
+  events::{AsyncEventHandler, DynamicEventAPITrait, EventHandler},
   hooks::DynamicHookAPITrait,
   plugins::{Plugin, PluginInfo},
 };
-use pwnagotchi_shared::traits::general::CoreModules;
+use pwnagotchi_shared::{traits::general::CoreModules, types::events::EventPayload};
 
 #[derive(Default)]
 pub struct HelloWorld;
@@ -12,6 +13,27 @@ pub struct HelloWorld;
 impl HelloWorld {
   pub fn new() -> Self {
     Self {}
+  }
+
+  fn handle_ready_event(&self) -> EventHandler {
+    Arc::new(move |_payload: &EventPayload| {
+      eprintln!("Ready event received!");
+      Ok(())
+    })
+  }
+
+  fn handle_starting_event(&self) -> EventHandler {
+    Arc::new(move |_payload: &EventPayload| {
+      eprintln!("Starting event received!");
+      Ok(())
+    })
+  }
+
+  fn handle_plugin_event(&self) -> EventHandler {
+    Arc::new(move |_payload: &EventPayload| {
+      eprintln!("plugin init event received!");
+      Ok(())
+    })
   }
 }
 
@@ -22,15 +44,19 @@ impl Plugin for HelloWorld {
       version: "0.1.0",
       author: "Your Name",
       description: "A simple Hello World plugin",
+      license: "MIT",
     }
   }
 
   fn on_load(
     &mut self,
     _hook_api: &mut dyn DynamicHookAPITrait,
+    event_api: &mut dyn DynamicEventAPITrait,
     _core: Arc<CoreModules>,
   ) -> Result<(), Box<dyn Error + 'static>> {
-    println!("Hello, world! Plugin started.");
+    event_api.register_listener("ready", self.handle_ready_event())?;
+    event_api.register_listener("starting", self.handle_starting_event())?;
+    event_api.register_listener("plugin::init", self.handle_plugin_event())?;
     Ok(())
   }
 
@@ -51,7 +77,6 @@ pub extern "C" fn _plugin_create() -> *mut dyn Plugin {
 #[allow(clippy::missing_safety_doc)]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn _plugin_destroy(ptr: *mut dyn Plugin) {
-  println!("Destroying HelloWorld plugin");
   if !ptr.is_null() {
     unsafe {
       drop(Box::from_raw(ptr));

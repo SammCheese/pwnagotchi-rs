@@ -11,7 +11,7 @@ use pwnagotchi_shared::{
 };
 use tokio::task::JoinHandle;
 
-use crate::agent::{is_module_running, start_module};
+use crate::agent::{is_module_running, restart_module, start_module};
 
 const WIFI_RECON: &str = "wifi.recon";
 
@@ -223,7 +223,7 @@ async fn start_monitor_mode(bc: &Arc<dyn BettercapTrait + Send + Sync>) {
 
   if wifi_running && !no_restart {
     LOGGER.log_debug("Agent", "Restarting WiFi module...");
-    start_module(bc, WIFI_RECON).await;
+    restart_module(bc, WIFI_RECON).await;
     let (tx, rx) = tokio::sync::oneshot::channel();
     let _ = bc.send(BettercapCommand::run("wifi.clear", Some(tx))).await;
     if let Err(e) = rx.await {

@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod manager_tests {
-  use std::sync::Arc;
+  use std::sync::{Arc, Once};
 
   // We need to include Hookables lmao
   #[allow(unused_imports)]
@@ -13,8 +13,17 @@ mod manager_tests {
     traits::hooks::{DynamicHookAPITrait, HookError},
   };
 
+  fn ensure_test_config() {
+    static INIT: Once = Once::new();
+    INIT.call_once(|| {
+      let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../test/config.toml");
+      pwnagotchi_shared::config::init_config(path);
+    });
+  }
+
   #[test]
   fn available_hooks_are_discoverable() {
+    ensure_test_config();
     let manager = HookManager::new();
     let hooks = manager.available_hooks();
     assert!(!hooks.is_empty(), "Expected at least one hook descriptor");
@@ -22,6 +31,7 @@ mod manager_tests {
 
   #[test]
   fn registering_unknown_hook_returns_error() {
+    ensure_test_config();
     let manager = HookManager::new();
     let mut api = manager.scope("test_plugin");
 
@@ -34,6 +44,7 @@ mod manager_tests {
 
   #[test]
   fn can_register_and_unregister_known_hook() {
+    ensure_test_config();
     let manager = HookManager::new();
     let mut api = manager.scope("test_plugin");
 
@@ -49,12 +60,14 @@ mod manager_tests {
 
   #[test]
   fn unregistering_unknown_plugin_is_noop() {
+    ensure_test_config();
     let manager = HookManager::new();
     assert!(manager.unregister_plugin("non_existent_plugin").is_ok());
   }
 
   #[test]
   fn hooks_automatically_unregistered_on_drop() {
+    ensure_test_config();
     let manager = HookManager::new();
     {
       let mut api = manager.scope("temp_plugin");
@@ -77,6 +90,7 @@ mod manager_tests {
 
   #[test]
   fn can_register_and_unregister_individual_hooks() {
+    ensure_test_config();
     let manager = HookManager::new();
     let mut api = manager.scope("test_plugin");
 
@@ -107,6 +121,7 @@ mod manager_tests {
 
   #[test]
   fn unregister_plugin_removes_all_hooks() {
+    ensure_test_config();
     let manager = HookManager::new();
     let mut api = manager.scope("plugin_a");
 
@@ -128,6 +143,7 @@ mod manager_tests {
 
   #[test]
   fn multiple_plugins_isolated() {
+    ensure_test_config();
     let manager = HookManager::new();
 
     {
