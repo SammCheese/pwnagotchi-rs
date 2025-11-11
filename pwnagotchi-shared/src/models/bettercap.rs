@@ -1,10 +1,11 @@
 use std::{borrow::Cow, collections::HashMap};
 
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::models::net::AccessPoint;
 
-#[derive(serde::Deserialize, Debug)]
+#[derive(Deserialize, Serialize, Debug)]
 pub struct BettercapSession {
   pub version: Cow<'static, str>,
   pub os: Cow<'static, str>,
@@ -30,7 +31,7 @@ pub struct BettercapSession {
   pub caplets: Vec<BCaplets>,
 }
 
-#[derive(serde::Deserialize, Debug)]
+#[derive(Deserialize, Serialize, Debug)]
 pub struct BGps {
   #[serde(rename = "Updated")]
   pub updated: String,
@@ -50,35 +51,35 @@ pub struct BGps {
   pub separation: f64,
 }
 
-#[derive(serde::Deserialize, Debug)]
+#[derive(Deserialize, Serialize, Debug)]
 pub struct BPackets {
   pub stats: HashMap<String, Value>,
   pub protos: HashMap<String, Value>,
   pub traffic: HashMap<String, BTraffic>,
 }
 
-#[derive(serde::Deserialize, Debug)]
+#[derive(Deserialize, Serialize, Debug)]
 pub struct BTraffic {
   pub sent: u64,
   pub received: u64,
 }
 
-#[derive(serde::Deserialize, Debug)]
+#[derive(Deserialize, Serialize, Debug)]
 pub struct BLan {
   pub hosts: Vec<BInterface>,
 }
 
-#[derive(serde::Deserialize, Debug)]
+#[derive(Deserialize, Serialize, Debug)]
 pub struct BGeneric {
   pub devices: Vec<BInterface>,
 }
 
-#[derive(serde::Deserialize, Debug)]
+#[derive(Deserialize, Serialize, Debug)]
 pub struct BEnv {
   pub data: HashMap<String, Value>,
 }
 
-#[derive(serde::Deserialize, Debug)]
+#[derive(Deserialize, Serialize, Debug)]
 pub struct BInterface {
   pub ipv4: Cow<'static, str>,
   pub ipv6: Cow<'static, str>,
@@ -91,12 +92,12 @@ pub struct BInterface {
   pub meta: Meta,
 }
 
-#[derive(serde::Deserialize, Debug, Clone)]
+#[derive(Deserialize, Debug, Clone, Serialize)]
 pub struct Meta {
   pub values: HashMap<String, Value>,
 }
 
-#[derive(serde::Deserialize, Debug, Clone)]
+#[derive(Deserialize, Debug, Clone, Serialize)]
 pub struct BResources {
   pub cpus: u32,
   pub max_cpus: u32,
@@ -106,7 +107,7 @@ pub struct BResources {
   pub gcs: u64,
 }
 
-#[derive(serde::Deserialize, Debug)]
+#[derive(Deserialize, Serialize, Debug)]
 pub struct BCaplets {
   pub path: Cow<'static, str>,
   pub size: u64,
@@ -115,19 +116,19 @@ pub struct BCaplets {
   pub scripts: Vec<BScripts>,
 }
 
-#[derive(serde::Deserialize, Debug)]
+#[derive(Deserialize, Serialize, Debug)]
 pub struct BScripts {
   pub path: Cow<'static, str>,
   pub size: u64,
   pub code: Vec<String>,
 }
 
-#[derive(serde::Deserialize, Debug)]
+#[derive(Deserialize, Serialize, Debug)]
 pub struct BWifi {
   pub aps: Vec<AccessPoint>,
 }
 
-#[derive(serde::Deserialize, Debug)]
+#[derive(Deserialize, Serialize, Debug)]
 pub struct BModule {
   pub name: Cow<'static, str>,
   pub description: Cow<'static, str>,
@@ -138,14 +139,14 @@ pub struct BModule {
   pub state: HashMap<String, Value>,
 }
 
-#[derive(serde::Deserialize, Debug)]
+#[derive(Deserialize, Serialize, Debug)]
 pub struct BModuleHandler {
   pub name: Cow<'static, str>,
   pub description: Cow<'static, str>,
   pub parser: Cow<'static, str>,
 }
 
-#[derive(serde::Deserialize, Debug)]
+#[derive(Deserialize, Serialize, Debug)]
 pub struct BModuleParameters {
   pub name: Cow<'static, str>,
   pub r#type: u16,
@@ -155,7 +156,7 @@ pub struct BModuleParameters {
   pub validator: Cow<'static, str>,
 }
 
-#[derive(serde::Deserialize, Debug)]
+#[derive(Deserialize, Serialize, Debug)]
 pub struct BInterfaces {
   pub index: u32,
   pub mtu: u32,
@@ -166,7 +167,7 @@ pub struct BInterfaces {
   pub addresses: Vec<BInterfaceAddress>,
 }
 
-#[derive(serde::Deserialize, Debug)]
+#[derive(Deserialize, Serialize, Debug)]
 pub struct BInterfaceAddress {
   pub address: Cow<'static, str>,
   pub r#type: Cow<'static, str>,

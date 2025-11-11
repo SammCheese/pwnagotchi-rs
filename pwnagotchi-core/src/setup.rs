@@ -1,25 +1,109 @@
 use std::{sync::Arc, time::Duration};
 
-use pwnagotchi_shared::{config::config, logger::LOGGER};
-
-use crate::{
-  agent::{is_module_running, start_module},
-  bettercap::BettercapCommand,
-  traits::bettercapcontroller::BettercapController,
+use anyhow::Result;
+use pwnagotchi_shared::{
+  config::config_read,
+  logger::LOGGER,
+  traits::{
+    bettercap::{BettercapCommand, BettercapTrait, SetupTrait},
+    general::{Component, CoreModules, Dependencies},
+  },
 };
+use tokio::task::JoinHandle;
+
+use crate::agent::{is_module_running, restart_module, start_module};
 
 const WIFI_RECON: &str = "wifi.recon";
 
-pub async fn perform_bettercap_setup(bc: &Arc<dyn BettercapController>) {
-  wait_for_bettercap(bc).await;
-  setup_events(bc).await;
-  start_monitor_mode(bc).await;
+pub struct SetupComponent {
+  setup: Option<Arc<dyn SetupTrait>>,
 }
 
-async fn setup_events(bc: &Arc<dyn BettercapController>) {
+impl Dependencies for SetupComponent {
+  fn name(&self) -> &'static str {
+    "SetupComponent"
+  }
+
+  fn dependencies(&self) -> &[&str] {
+    &["Bettercap"]
+  }
+}
+
+#[async_trait::async_trait]
+impl Component for SetupComponent {
+  async fn init(&mut self, ctx: &CoreModules) -> Result<()> {
+    let bc = &ctx.bettercap;
+    let setup = Setup::new(Arc::clone(bc));
+    self.setup = Some(Arc::new(setup));
+
+    Ok(())
+  }
+
+  async fn start(&self) -> Result<Option<JoinHandle<()>>> {
+    if let Some(setup) = &self.setup {
+      setup.perform_setup().await;
+    }
+    Ok(None)
+  }
+}
+
+impl Default for SetupComponent {
+  fn default() -> Self {
+    Self::new()
+  }
+}
+
+impl SetupComponent {
+  pub fn new() -> Self {
+    Self { setup: None }
+  }
+}
+
+pub struct Setup {
+  bc: Arc<dyn BettercapTrait + Send + Sync>,
+}
+
+impl Setup {
+  pub fn new(bc: Arc<dyn BettercapTrait + Send + Sync>) -> Self {
+    Self { bc }
+  }
+
+  pub async fn start_setup(&self) {
+    perform_bettercap_setup(&self.bc).await;
+  }
+}
+
+impl Dependencies for Setup {
+  fn name(&self) -> &'static str {
+    "Setup"
+  }
+
+  fn dependencies(&self) -> &[&str] {
+    &["Bettercap"]
+  }
+}
+
+#[async_trait::async_trait]
+impl SetupTrait for Setup {
+  async fn perform_setup(&self) {
+    perform_bettercap_setup(&self.bc).await;
+  }
+}
+
+pub async fn perform_bettercap_setup(bc: &Arc<dyn BettercapTrait + Send + Sync>) {
+  let bc = Arc::clone(bc);
+
+  wait_for_bettercap(&bc).await;
+  setup_events(&bc).await;
+  start_monitor_mode(&bc).await;
+}
+
+async fn setup_events(bc: &Arc<dyn BettercapTrait + Send + Sync>) {
   LOGGER.log_debug("Agent", "Setting up Bettercap events...");
 
-  for event in &config().bettercap.silence {
+  let silence_events = config_read().bettercap.silence.clone();
+
+  for event in silence_events {
     let (tx, rx) = tokio::sync::oneshot::channel();
     let _ = bc.send(BettercapCommand::run(format!("events.ignore {event}"), Some(tx))).await;
 
@@ -29,11 +113,16 @@ async fn setup_events(bc: &Arc<dyn BettercapController>) {
   }
 }
 
-async fn reset_wifi_settings(bc: &Arc<dyn BettercapController>) {
-  let interface = &config().main.iface;
-  let ap_ttl = format!("{}", config().personality.ap_ttl);
-  let sta_ttl = format!("{}", config().personality.sta_ttl);
-  let min_rssi = format!("{}", config().personality.min_rssi);
+async fn reset_wifi_settings(bc: &Arc<dyn BettercapTrait + Send + Sync>) {
+  let (interface, ap_ttl, sta_ttl, min_rssi) = {
+    let cfg = config_read();
+    (
+      cfg.main.iface.clone(),
+      cfg.personality.ap_ttl,
+      cfg.personality.sta_ttl,
+      cfg.personality.min_rssi,
+    )
+  };
   let (ap_tx, ap_rx) = tokio::sync::oneshot::channel();
   let (sta_tx, sta_rx) = tokio::sync::oneshot::channel();
   let (tx, rx) = tokio::sync::oneshot::channel();
@@ -69,7 +158,7 @@ async fn reset_wifi_settings(bc: &Arc<dyn BettercapController>) {
   }
 
   let (tx, rx) = tokio::sync::oneshot::channel();
-  let path = &config().bettercap.handshakes;
+  let path = &config_read().bettercap.handshakes.clone();
   let _ = bc
     .send(BettercapCommand::run(format!("set wifi.handshakes.file {path}"), Some(tx)))
     .await;
@@ -86,10 +175,11 @@ async fn reset_wifi_settings(bc: &Arc<dyn BettercapController>) {
   }
 }
 
-async fn start_monitor_mode(bc: &Arc<dyn BettercapController>) {
-  let interface = &config().main.iface;
-  let mon_start_cmd = &config().main.mon_start_cmd;
-  let no_restart = &config().main.no_restart;
+async fn start_monitor_mode(bc: &Arc<dyn BettercapTrait + Send + Sync>) {
+  let (interface, mon_start_cmd, no_restart) = {
+    let cfg = config_read();
+    (cfg.main.iface.clone(), cfg.main.mon_start_cmd.clone(), cfg.main.no_restart)
+  };
   let mut is_starting = false;
   let mut has_iface = false;
 
@@ -141,7 +231,7 @@ async fn start_monitor_mode(bc: &Arc<dyn BettercapController>) {
 
   if wifi_running && !no_restart {
     LOGGER.log_debug("Agent", "Restarting WiFi module...");
-    start_module(bc, WIFI_RECON).await;
+    restart_module(bc, WIFI_RECON).await;
     let (tx, rx) = tokio::sync::oneshot::channel();
     let _ = bc.send(BettercapCommand::run("wifi.clear", Some(tx))).await;
     if let Err(e) = rx.await {
@@ -155,7 +245,7 @@ async fn start_monitor_mode(bc: &Arc<dyn BettercapController>) {
   //self.advertiser.start_advertising()
 }
 
-async fn wait_for_bettercap(bc: &Arc<dyn BettercapController>) {
+async fn wait_for_bettercap(bc: &Arc<dyn BettercapTrait + Send + Sync>) {
   LOGGER.log_info("Agent", "Waiting for Bettercap...");
   loop {
     let (tx, rx) = tokio::sync::oneshot::channel();

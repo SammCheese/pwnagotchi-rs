@@ -1,5 +1,6 @@
 use std::{borrow::Cow, sync::Arc};
 
+use anyhow::Result;
 use axum::{
   Router,
   body::Body,
@@ -7,92 +8,108 @@ use axum::{
   http::{Request, StatusCode, header},
   middleware::{self, Next},
   response::{IntoResponse, Response},
-  routing::get,
+  routing::{get, post},
 };
 use axum_auth::AuthBasic;
 use include_dir::{Dir, include_dir};
+use parking_lot::RwLock;
+use pwnagotchi_plugins::managers::plugin_manager::PluginManager;
 use pwnagotchi_shared::{
-  config::config, identity::Identity, logger::LOGGER, sessions::manager::SessionManager,
+  config::config_read,
+  identity::Identity,
+  logger::LOGGER,
+  sessions::manager::SessionManager,
+  traits::{general::Dependencies, grid::GridTrait, ui::ServerTrait},
 };
 use tokio::sync::oneshot;
 
 use crate::web::pages::handler::{
   inbox_handler, index_handler, message_handler, new_message_handler, peers_handler,
-  plugins_handler, profile_handler, status_handler, ui,
+  plugins_handler, profile_handler, status_handler, toggle_handler, ui,
 };
 
 pub static TEMPLATE_ASSETS: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/assets/templates");
 pub static STATIC_ASSETS: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/assets/static");
 pub static FONT_ASSETS: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/assets/fonts");
 
+impl Dependencies for Server {
+  fn name(&self) -> &'static str {
+    "WebUI"
+  }
+
+  fn dependencies(&self) -> &[&str] {
+    &["SessionManager", "Identity"]
+  }
+}
+
+#[derive(Clone)]
+#[allow(dead_code)]
+pub struct WebUIState {
+  pub sm: Arc<SessionManager>,
+  pub identity: Arc<RwLock<Identity>>,
+  pub pluginmanager: Arc<RwLock<PluginManager>>,
+  pub grid: Arc<dyn GridTrait + Send + Sync>,
+}
+
 pub struct Server {
+  pub router: Router,
   pub address: Cow<'static, str>,
   pub port: u16,
+  #[allow(dead_code)]
   shutdown_tx: Option<oneshot::Sender<()>>,
 }
 
-impl Default for Server {
-  fn default() -> Self {
-    Self::new()
+#[async_trait::async_trait]
+impl ServerTrait for Server {
+  async fn start_server(&self) -> Result<(), String> {
+    self.start_server().await
   }
+
+  async fn stop_server(&self) {}
 }
 
 impl Server {
   #[must_use]
-  pub fn new() -> Self {
-    let cfg = &config().ui.web;
+  pub fn new(router: Router) -> Self {
+    let cfg = &config_read().ui.web;
     Self {
+      router,
       address: cfg.address.clone(),
       port: cfg.port,
       shutdown_tx: None,
     }
   }
-  /// Starts the server.
-  ///
-  /// # Panics
-  ///
-  /// This function will panic if it fails to bind to address.
-  pub fn start(&mut self, sm: &Arc<SessionManager>, identity: &Arc<Identity>) {
+
+  pub async fn start_server(&self) -> Result<(), String> {
     if self.address.is_empty() {
       LOGGER.log_info("Server", "Couldn't get IP of USB0, video server not starting");
-    } else {
-      let addr = format!("{}:{}", self.address, self.port);
+      return Err("Couldn't get IP of USB0, video server not starting".into());
+    }
 
-      let (shutdown_tx, shutdown_rx) = oneshot::channel();
-      self.shutdown_tx = Some(shutdown_tx);
+    let addr = format!("{}:{}", self.address, self.port);
+    let router = self.router.clone();
 
-      let sm = Arc::clone(sm);
-      let identity = Arc::clone(identity);
-
-      tokio::spawn(async move {
-        let app = build_router(sm, identity);
-
-        match tokio::net::TcpListener::bind(&addr).await {
-          Ok(listener) => {
-            if let Err(e) = axum::serve(listener, app).await {
-              LOGGER.log_error("Server", &format!("Failed to serve: {e}"));
-              shutdown_rx.await.ok();
-            }
-          }
-          Err(e) => {
-            LOGGER.log_error("Server", &format!("Failed to bind to {addr}: {e}"));
+    tokio::spawn(async move {
+      match tokio::net::TcpListener::bind(&addr).await {
+        Ok(listener) => {
+          if let Err(e) = axum::serve(listener, router).await {
+            LOGGER.log_error("Server", &format!("Failed to serve: {e}"));
           }
         }
-      });
-    }
-  }
-
-  pub fn stop(&mut self) {
-    if let Some(tx) = self.shutdown_tx.take() {
-      let _ = tx.send(());
-    }
+        Err(e) => {
+          LOGGER.log_error("Server", &format!("Failed to bind to {addr}: {e}"));
+        }
+      }
+    });
+    Ok(())
   }
 }
 
 async fn basic_auth_middleware(req: Request<Body>, next: Next) -> impl IntoResponse {
-  let cfg = &config().ui.web;
+  let cfg = &config_read().ui.web.clone();
+  let (username, password) = (cfg.username.to_string(), cfg.password.to_string());
 
-  if cfg.username.is_empty() || cfg.password.is_empty() {
+  if username.is_empty() || password.is_empty() {
     return next.run(req).await;
   }
 
@@ -124,7 +141,14 @@ fn compare_safely(a: &str, b: &str) -> bool {
   diff == 0
 }
 
-pub fn build_router(sm: Arc<SessionManager>, identity: Arc<Identity>) -> Router {
+pub fn build_router(
+  sm: Arc<SessionManager>,
+  identity: Arc<RwLock<Identity>>,
+  pluginmanager: Arc<RwLock<PluginManager>>,
+  grid: Arc<dyn GridTrait + Send + Sync>,
+) -> Router {
+  let state = Arc::new(WebUIState { sm, identity, pluginmanager, grid });
+
   Router::new()
     .layer(middleware::from_fn(basic_auth_middleware))
     // Template routes
@@ -145,11 +169,13 @@ pub fn build_router(sm: Arc<SessionManager>, identity: Arc<Identity>) -> Router 
     .route("/inbox/send", get(new_message_handler))
     // Plugins
     .route("/plugins", get(plugins_handler))
+    .route("/plugins/toggle", post(toggle_handler))
+    //.route("/plugins/{plugin}", get(plugin_template_handler))
     .route("/status", get(status_handler))
     .route("/message", get(message_handler))
     // Static
     .route("/{*path}", get(static_handler))
-    .with_state((sm, identity))
+    .with_state(state)
 }
 
 pub async fn static_handler(Path(path): Path<String>) -> Response {

@@ -1,6 +1,6 @@
 /target
 /test
+/dist
 perf.data
 heaptrack.*
 *.log
-

@@ -13,7 +13,9 @@ readme.workspace = true
 
 
 [dependencies]
+pwnagotchi-macros = { path= "../pwnagotchi-macros" }
 pwnagotchi-shared = { path= "../pwnagotchi-shared" }
+pwnagotchi-hw = { path= "../pwnagotchi-hw" }
 
 async-trait.workspace = true
 tokio.workspace = true
@@ -31,7 +33,7 @@ fastrand.workspace = true
 hex.workspace = true
 regex.workspace = true
 base64.workspace = true
-
-
+inventory.workspace = true
+once_cell.workspace = true
 
 

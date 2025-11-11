@@ -1,7 +1,7 @@
-use crate::models::net::AccessPoint;
+use crate::{models::net::AccessPoint, traits::general::CoreModule};
 
 #[async_trait::async_trait]
-pub trait AgentObserver: Send + Sync {
+pub trait AutomataTrait: Send + Sync + CoreModule {
   fn on_miss(&self, who: &AccessPoint);
   fn on_error(&self, ap: &AccessPoint, err: &str);
   fn set_starting(&self);
@@ -18,5 +18,4 @@ pub trait AgentObserver: Send + Sync {
   fn is_stale(&self) -> bool;
   fn any_activity(&self) -> bool;
   fn next_epoch(&self);
-  fn has_support_network_for(&self, factor: f32) -> bool;
 }

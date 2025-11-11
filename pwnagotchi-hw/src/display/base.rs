@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use pwnagotchi_shared::config::config;
+use pwnagotchi_shared::config::config_read;
 use tiny_skia::Pixmap as RgbaImage;
 
 use crate::display::waveshare2in13b_v4::Waveshare2in13bV4;
@@ -47,7 +47,7 @@ impl Default for DisplayImpl {
   fn default() -> Self {
     Self {
       display: None,
-      name: config().main.name.to_string(),
+      name: config_read().main.name.to_string(),
       layout: Layout {
         width: 0,
         height: 0,
@@ -114,7 +114,7 @@ impl DisplayImpl {
 }
 
 pub fn get_display_from_config() -> Arc<dyn DisplayTrait + Send + Sync> {
-  match config().ui.display.r#type.as_str() {
+  match config_read().ui.display.r#type.as_str() {
     "waveshare_v4" => Arc::new(Waveshare2in13bV4::new()),
     _ => Arc::new(DisplayImpl::default_fallback()),
   }

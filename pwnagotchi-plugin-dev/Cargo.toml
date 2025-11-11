@@ -1,0 +1,20 @@
+[package]
+name = "pwnagotchi-plugin-dev"
+description = "Devtools for Pwnagotchi-rs Plugins"
+
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+keywords.workspace = true
+categories.workspace = true
+readme.workspace = true
+
+
+[dependencies]
+pwnagotchi-macros = { path = "../pwnagotchi-macros" }
+pwnagotchi-shared = { path = "../pwnagotchi-shared" }
+pwnagotchi-core = { path = "../pwnagotchi-core" }
+
+

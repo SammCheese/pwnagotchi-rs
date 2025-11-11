@@ -7,64 +7,112 @@ use std::{
   time::Duration,
 };
 
+use anyhow::Result;
 use base64::{Engine, engine::general_purpose};
 use futures_util::{SinkExt, StreamExt};
-use pwnagotchi_shared::{config::config, logger::LOGGER, models::bettercap::BettercapSession};
-use tokio::sync::{broadcast, mpsc};
-use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
+use pwnagotchi_shared::{
+  config::config_read,
+  logger::LOGGER,
+  models::bettercap::BettercapSession,
+  traits::{
+    bettercap::{BettercapCommand, BettercapTrait},
+    general::{Component, CoreModule, CoreModules, Dependencies},
+  },
+};
+use tokio::{sync::broadcast, task::JoinHandle};
+use tokio_tungstenite::{
+  connect_async,
+  tungstenite::{client::IntoClientRequest, protocol::Message},
+};
 use ureq::{
   Agent, Body, SendBody,
   http::{Request, Response, header::HeaderValue},
   middleware::MiddlewareNext,
 };
 
-use crate::traits::bettercapcontroller::BettercapController;
-
-pub enum BettercapCommand {
-  Run { cmd: String, respond_to: tokio::sync::oneshot::Sender<Result<(), anyhow::Error>> },
-  GetSession { respond_to: tokio::sync::oneshot::Sender<Option<BettercapSession>> },
-  SubscribeEvents { respond_to: tokio::sync::oneshot::Sender<broadcast::Receiver<String>> },
-}
-
-impl BettercapCommand {
-  pub fn run<S>(
-    cmd: S,
-    respond_to: Option<tokio::sync::oneshot::Sender<Result<(), anyhow::Error>>>,
-  ) -> Self
-  where
-    S: 'static + AsRef<str>,
-  {
-    let tx = respond_to.map_or_else(
-      || {
-        let (tx, _rx) = tokio::sync::oneshot::channel();
-        tx
-      },
-      |tx| tx,
-    );
-    Self::Run { cmd: cmd.as_ref().into(), respond_to: tx }
-  }
-}
-
-#[derive(Clone)]
-pub struct BettercapHandle {
-  pub command_tx: mpsc::Sender<BettercapCommand>,
-}
-
 #[async_trait::async_trait]
-impl BettercapController for BettercapHandle {
+impl BettercapTrait for Bettercap {
   async fn send(&self, cmd: BettercapCommand) -> anyhow::Result<()> {
-    let _ = self.command_tx.send(cmd).await;
+    match cmd {
+      BettercapCommand::Run { cmd, respond_to } => {
+        let res = self.run(&cmd).await;
+        let _ = respond_to.send(res);
+      }
+      BettercapCommand::GetSession { respond_to } => {
+        let res = self.session(None);
+        let _ = respond_to.send(res);
+      }
+      BettercapCommand::SubscribeEvents { respond_to } => {
+        let rx = self.subscribe_events();
+        let _ = respond_to.send(rx);
+      }
+    }
     Ok(())
   }
 
   async fn session(&self) -> anyhow::Result<Option<BettercapSession>> {
-    let (tx, rx) = tokio::sync::oneshot::channel();
-    let cmd = BettercapCommand::GetSession { respond_to: tx };
-    let _ = self.command_tx.send(cmd).await;
-    match rx.await {
-      Ok(session) => Ok(session),
-      Err(e) => Err(anyhow::anyhow!("Failed to get Bettercap session: {e}")),
+    Ok(self.session(None))
+  }
+
+  async fn run_websocket(&self) {
+    Bettercap::run_websocket(self).await;
+  }
+
+  fn is_ready(&self) -> bool {
+    Bettercap::is_ready(self)
+  }
+
+  async fn run(&self, cmd: &str) -> Result<(), anyhow::Error> {
+    Bettercap::run(self, cmd).await
+  }
+}
+
+pub struct BettercapComponent {
+  bettercap: Option<Arc<dyn BettercapTrait + Send + Sync>>,
+}
+
+impl Default for BettercapComponent {
+  fn default() -> Self {
+    Self::new()
+  }
+}
+
+impl BettercapComponent {
+  pub fn new() -> Self {
+    Self { bettercap: None }
+  }
+}
+
+impl Dependencies for BettercapComponent {
+  fn name(&self) -> &'static str {
+    "BettercapComponent"
+  }
+
+  fn dependencies(&self) -> &[&str] {
+    &["Bettercap"]
+  }
+}
+
+#[async_trait::async_trait]
+impl Component for BettercapComponent {
+  async fn init(&mut self, ctx: &CoreModules) -> Result<()> {
+    self.bettercap = Some(Arc::clone(&ctx.bettercap));
+    Ok(())
+  }
+
+  async fn start(&self) -> Result<Option<JoinHandle<()>>> {
+    if let Some(bc) = &self.bettercap
+      && !bc.is_ready()
+    {
+      LOGGER.log_info("Bettercap", "Starting Bettercap WebSocket connection...");
+      let bc = Arc::clone(bc);
+      let handle = tokio::spawn(async move {
+        bc.run_websocket().await;
+      });
+
+      return Ok(Some(handle));
     }
+    Ok(None)
   }
 }
 
@@ -90,28 +138,10 @@ pub struct Bettercap {
   req_client: Agent,
 }
 
-pub fn spawn_bettercap(bc: &Arc<Bettercap>) -> BettercapHandle {
-  let (tx, mut rx) = mpsc::channel::<BettercapCommand>(100);
-
-  let bettercap = Arc::clone(bc);
-  tokio::spawn(async move {
-    while let Some(cmd) = rx.recv().await {
-      match cmd {
-        BettercapCommand::Run { cmd, respond_to } => {
-          let res = bettercap.run(&cmd).await;
-          let _ = respond_to.send(res);
-        }
-        BettercapCommand::GetSession { respond_to } => {
-          let _ = respond_to.send(bettercap.session(None));
-        }
-        BettercapCommand::SubscribeEvents { respond_to } => {
-          let _ = respond_to.send(bettercap.subscribe_events());
-        }
-      }
-    }
-  });
-
-  BettercapHandle { command_tx: tx }
+impl CoreModule for Bettercap {
+  fn name(&self) -> &'static str {
+    "Bettercap"
+  }
 }
 
 impl Default for Bettercap {
@@ -124,28 +154,24 @@ fn bettercap_add_authorization(
   mut req: Request<SendBody>,
   next: MiddlewareNext,
 ) -> Result<Response<Body>, ureq::Error> {
-  let username = config().bettercap.username.to_string();
-  let password = config().bettercap.password.to_string();
-  req.headers_mut().insert(
-    "Authorization",
-    HeaderValue::from_str(&format!(
-      "Basic {}",
-      general_purpose::STANDARD.encode(format!("{username}:{password}"))
-    ))
-    .unwrap(),
-  );
+  let username = config_read().bettercap.username.to_string();
+  let password = config_read().bettercap.password.to_string();
+  let b64 = general_purpose::STANDARD.encode(format!("{username}:{password}"));
+  req
+    .headers_mut()
+    .insert("Authorization", HeaderValue::from_str(&format!("Basic {b64}")).unwrap());
   next.handle(req)
 }
 
 impl Bettercap {
   pub fn new() -> Self {
-    let scheme = if config().bettercap.port == 443 { "https" } else { "http" };
-    let ws_scheme = if config().bettercap.port == 443 { "wss" } else { "ws" };
+    let scheme = if config_read().bettercap.port == 443 { "https" } else { "http" };
+    let ws_scheme = if config_read().bettercap.port == 443 { "wss" } else { "ws" };
     let max_queue = 10_000usize;
     let (event_tx, _rx) = broadcast::channel(max_queue);
 
     let agent_config = ureq::Agent::config_builder()
-      .timeout_global(Some(std::time::Duration::from_secs(10)))
+      .timeout_global(Some(std::time::Duration::from_secs(5)))
       .middleware(bettercap_add_authorization)
       .build();
     let req_client = Agent::new_with_config(agent_config);
@@ -157,25 +183,25 @@ impl Bettercap {
       max_queue,
       min_sleep: 0.5,
       max_sleep: 5.0,
-      hostname: Cow::Borrowed(&config().bettercap.hostname),
-      port: config().bettercap.port,
-      username: Cow::Borrowed(&config().bettercap.username),
-      password: Cow::Borrowed(&config().bettercap.password),
+      hostname: config_read().bettercap.hostname.clone(),
+      port: config_read().bettercap.port,
+      username: config_read().bettercap.username.clone(),
+      password: config_read().bettercap.password.clone(),
       url: format!(
         "{}://{}:{}@{}:{}/api",
         scheme,
-        config().bettercap.username,
-        config().bettercap.password,
-        config().bettercap.hostname,
-        config().bettercap.port
+        config_read().bettercap.username,
+        config_read().bettercap.password,
+        config_read().bettercap.hostname,
+        config_read().bettercap.port
       ),
       websocket_url: format!(
         "{}://{}:{}@{}:{}/api/events",
         ws_scheme,
-        config().bettercap.username,
-        config().bettercap.password,
-        config().bettercap.hostname,
-        config().bettercap.port
+        config_read().bettercap.username,
+        config_read().bettercap.password,
+        config_read().bettercap.hostname,
+        config_read().bettercap.port
       ),
       scheme: Cow::Borrowed(scheme),
       is_ready: Arc::new(AtomicBool::new(false)),
@@ -217,8 +243,17 @@ impl Bettercap {
 
     LOGGER.log_info("Bettercap", "Connecting to Event WebSocket");
 
+    // Prepare authorization header value
+    let auth_header = format!(
+      "Basic {}",
+      general_purpose::STANDARD.encode(format!("{}:{}", self.username, self.password))
+    );
+
     loop {
-      match connect_async(&ws_url).await {
+      let mut req = ws_url.clone().into_client_request().unwrap();
+      req.headers_mut().insert("Authorization", auth_header.parse().unwrap());
+
+      match connect_async(req).await {
         Ok((ws_stream, _)) => {
           self.is_ready.store(true, Ordering::SeqCst);
           LOGGER.log_info("Bettercap", "Event WebSocket connected");
@@ -259,16 +294,6 @@ impl Bettercap {
     self.event_tx.subscribe()
   }
 
-  /// Sends a command to Bettercap via HTTP POST.
-  ///
-  /// # Arguments
-  ///
-  /// * `args` - A slice of command arguments to send.
-  ///
-  /// # Errors
-  ///
-  /// Returns an error if the HTTP request fails or if Bettercap does not
-  /// respond
   pub async fn run(&self, cmd: &str) -> Result<(), anyhow::Error> {
     let url = self
       .url

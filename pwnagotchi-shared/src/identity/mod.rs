@@ -1,20 +1,72 @@
 use std::{
-  path::{self, Path},
-  process::{Command, exit},
+  error::Error,
+  path::{self},
+  process::Command,
+  sync::Arc,
 };
 
+use anyhow::{Result, anyhow};
 use base64::{Engine, engine::general_purpose};
+use hex::ToHex;
+use parking_lot::RwLock;
 use rsa::{
-  Pss, RsaPrivateKey, RsaPublicKey,
-  pkcs1::{DecodeRsaPrivateKey, EncodeRsaPublicKey},
-  pkcs8::DecodePublicKey,
-  rand_core::OsRng,
-  traits::SignatureScheme,
+  self, Pss, RsaPrivateKey, RsaPublicKey, pkcs1::DecodeRsaPrivateKey, pkcs8::DecodePublicKey,
+  rand_core::OsRng, traits::SignatureScheme,
 };
 use sha2::{Digest, Sha256};
+use tokio::task::JoinHandle;
 
-use crate::{config::config, logger::LOGGER};
+use crate::{
+  config::config_read,
+  logger::LOGGER,
+  traits::{
+    general::{Component, CoreModule, CoreModules, Dependencies},
+    ui::ViewTrait,
+  },
+};
 
+pub struct IdentityComponent {
+  identity: Option<Arc<RwLock<Identity>>>,
+}
+
+impl Default for IdentityComponent {
+  fn default() -> Self {
+    Self::new()
+  }
+}
+
+impl IdentityComponent {
+  pub const fn new() -> Self {
+    Self { identity: None }
+  }
+}
+
+impl Dependencies for IdentityComponent {
+  fn name(&self) -> &'static str {
+    "IdentityComponent"
+  }
+
+  fn dependencies(&self) -> &[&str] {
+    &["Identity"]
+  }
+}
+
+#[async_trait::async_trait]
+impl Component for IdentityComponent {
+  async fn init(&mut self, ctx: &CoreModules) -> Result<()> {
+    let ident = Arc::clone(&ctx.identity);
+    let view = Arc::clone(&ctx.view);
+    ident.write().initialize(view);
+    self.identity = Some(ident);
+    Ok(())
+  }
+
+  async fn start(&self) -> Result<Option<JoinHandle<()>>> {
+    if let Some(_id) = &self.identity { Ok(None) } else { Err(anyhow!("identity not initialized")) }
+  }
+}
+
+#[derive(Clone)]
 pub struct Identity {
   pub path: String,
   priv_path: String,
@@ -33,15 +85,20 @@ impl Default for Identity {
   }
 }
 
+impl CoreModule for Identity {
+  fn name(&self) -> &'static str {
+    "Identity"
+  }
+}
+
 impl Identity {
   pub fn new() -> Self {
     // Ensure we handle handle paths consistently
-    let path = config().debug.identity_path.to_string().trim_end_matches('/').to_string();
+    let path = config_read().debug.identity_path.to_string().trim_end_matches('/').to_string();
     let priv_path = format!("{path}/id_rsa");
     let pub_path = format!("{priv_path}.pub");
     let fingerprint_path = format!("{path}/fingerprint");
-
-    let mut ident = Self {
+    Self {
       path,
       priv_path,
       priv_key: None,
@@ -50,13 +107,10 @@ impl Identity {
       fingerprint_path,
       pubkey_pem_b64: None,
       fingerprint: None,
-    };
-
-    ident.initialize();
-    ident
+    }
   }
 
-  pub fn initialize(&mut self) {
+  pub fn initialize(&mut self, view: Arc<dyn ViewTrait + Send + Sync>) {
     if !path::Path::new(&self.path).exists()
       && let Err(e) = std::fs::create_dir_all(&self.path)
     {
@@ -64,8 +118,12 @@ impl Identity {
         "IDENTITY",
         &format!("Failed to create identity directory {:?}: {e}", &self.path),
       );
-
-      exit(1);
+      LOGGER.log_error("IDENTITY", "Using temporary identity...");
+      self.path = "/tmp/pwnagotchi-identity".to_string();
+      self.priv_path = format!("{}/id_rsa", &self.path);
+      self.pub_path = format!("{}/id_rsa.pub", &self.path);
+      self.fingerprint_path = format!("{}/fingerprint", &self.path);
+      let _ = std::fs::create_dir_all(&self.path);
     }
 
     loop {
@@ -73,12 +131,13 @@ impl Identity {
         Ok(()) => {
           break;
         }
-        Err(_) => {
+        Err(e) => {
+          LOGGER.log_debug("IDENTITY", &format!("Failed to load Keys: {e}"));
           // Warning because this might be the first run
-          LOGGER.log_warning("IDENTITY", "Keys failed to load. Regenerating keys.");
+          LOGGER.log_warning("IDENTITY", "Couldn't load Keys. Regenerating...");
+          view.on_keys_generation();
 
           let _ = Command::new("pwngrid").arg("-generate").arg("-keys").arg(&self.path).status();
-          old_header_fix(Path::new(&self.pub_path));
         }
       }
 
@@ -87,6 +146,7 @@ impl Identity {
       }
 
       std::thread::sleep(std::time::Duration::from_secs(5));
+      view.on_starting();
     }
   }
 
@@ -94,21 +154,24 @@ impl Identity {
     self.fingerprint.as_deref().unwrap_or("unknown")
   }
 
-  fn try_load_keys(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+  fn try_load_keys(&mut self) -> Result<(), Box<dyn Error>> {
     let priv_key = RsaPrivateKey::read_pkcs1_pem_file(&self.priv_path)?;
-    let pub_key = RsaPublicKey::read_public_key_pem_file(&self.pub_path)?;
+    let pub_pem = &std::fs::read_to_string(&self.pub_path)?;
+    let pub_key = RsaPublicKey::from_public_key_pem(&header_fix(pub_pem))?;
 
     self.priv_key = Some(priv_key);
     self.pub_key = Some(pub_key.clone());
 
-    let pem = pub_key.to_pkcs1_pem(rsa::pkcs1::LineEnding::LF)?;
-    let pem_bytes = pem.as_bytes();
+    // Oh my god who the fuck thought "hmm yes, the header should have
+    // direct influence on the fingerprint"
+    let pem = pub_pem.trim_end();
+    let b64 = general_purpose::STANDARD.encode(pem);
 
-    self.pubkey_pem_b64 = Some(general_purpose::STANDARD.encode(pem_bytes));
+    self.pubkey_pem_b64 = Some(b64);
 
-    let hash = Sha256::digest(pem_bytes);
+    let digest = Sha256::digest(pem).encode_hex::<String>();
 
-    self.fingerprint = Some(hex::encode(hash));
+    self.fingerprint = Some(digest.to_string());
 
     if let Some(fingerprint) = &self.fingerprint {
       std::fs::write(&self.fingerprint_path, fingerprint)?;
@@ -128,28 +191,24 @@ impl Identity {
   pub fn sign(&self, message: &str) -> Result<String, String> {
     let key = self.priv_key.as_ref().ok_or("Private key not loaded")?;
 
-    let pss = Pss::new_with_salt::<Sha256>(16);
+    let hashed = Sha256::digest(message.as_bytes());
+    let signer = Pss::new_with_salt::<Sha256>(16);
 
-    let signature = pss
-      .sign(Some(&mut OsRng), key, message.as_bytes())
+    let signature = signer
+      .sign(Some(&mut OsRng), key, &hashed)
       .map_err(|e| format!("Signing failed: {e}"))?;
 
-    let signature_b64 = general_purpose::STANDARD.encode(&signature);
+    let signature_b64 = general_purpose::STANDARD.encode(&signature).to_string();
+    let _signature_str = general_purpose::STANDARD
+      .decode(&signature_b64)
+      .map_err(|e| format!("Base64 decoding failed: {e}"))?;
 
     Ok(signature_b64)
   }
 }
 
-fn old_header_fix(path: &Path) {
-  if let Ok(metadata) = std::fs::metadata(path)
-    && metadata.is_file()
-    && let Ok(content) = std::fs::read_to_string(path)
-  {
-    let fixed = content
-      .replace("-----BEGIN RSA PUBLIC KEY-----", "-----BEGIN PUBLIC KEY-----")
-      .replace("-----END RSA PUBLIC KEY-----", "-----END PUBLIC KEY-----");
-    if fixed != content {
-      let _ = std::fs::write(path, fixed);
-    }
-  }
+fn header_fix(pubkey: &str) -> String {
+  pubkey
+    .replace("-----BEGIN RSA PUBLIC KEY-----", "-----BEGIN PUBLIC KEY-----")
+    .replace("-----END RSA PUBLIC KEY-----", "-----END PUBLIC KEY-----")
 }

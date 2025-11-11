@@ -2,8 +2,10 @@
 
 use std::process::Command;
 
+use pwnagotchi_macros::hookable;
 use regex::Regex;
 
+#[hookable]
 pub fn iface_channels(name: &str) -> Vec<u8> {
   let phy_out = match Command::new("/sbin/iw").args(["dev", name, "info"]).output() {
     Ok(output) => output,

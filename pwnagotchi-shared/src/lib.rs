@@ -1,16 +1,27 @@
+pub mod ai;
 pub mod config;
 pub mod identity;
 pub mod logger;
+pub mod voice;
 
 pub mod traits {
+  pub mod agent;
   pub mod automata;
+  pub mod bettercap;
+  pub mod epoch;
+  pub mod events;
+  pub mod general;
+  pub mod grid;
   pub mod logger;
+  pub mod plugins;
   pub mod ui;
-  pub mod voice;
 }
 
 pub mod types {
   pub mod epoch;
+  pub mod events;
+  pub mod grid;
+  pub mod hooks;
   pub mod ui;
 }
 
@@ -39,4 +50,6 @@ pub mod utils {
   pub mod agent;
   pub mod faces;
   pub mod general;
+  pub mod hooks;
+  pub mod wifi;
 }

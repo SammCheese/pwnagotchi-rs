@@ -1,6 +1,4 @@
-use std::{collections::HashMap, sync::Arc, time::SystemTime};
-
-use parking_lot::RwLock;
+use std::{collections::HashMap, time::SystemTime};
 
 use crate::{
   mesh::peer::Peer,
@@ -15,7 +13,7 @@ pub struct Session {
   pub started_at: SystemTime,
   pub supported_channels: Vec<u8>,
   pub mode: RunningMode,
-  pub state: Arc<RwLock<SessionState>>,
+  pub state: SessionState,
 }
 
 #[derive(Debug, Clone)]
@@ -42,7 +40,7 @@ impl Session {
       started_at: std::time::SystemTime::now(),
       supported_channels: vec![],
       mode: RunningMode::Manual,
-      state: Arc::new(RwLock::new(SessionState {
+      state: SessionState {
         current_channel: 0,
         total_aps: 0,
         aps_on_channel: 0,
@@ -51,7 +49,7 @@ impl Session {
         last_pwned: None,
         history: HashMap::new(),
         handshakes: HashMap::new(),
-      })),
+      },
     }
   }
 }

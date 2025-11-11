@@ -4,33 +4,46 @@ use std::{process::exit, sync::Arc};
 
 use clap::Parser;
 use nix::libc::EXIT_SUCCESS;
-use parking_lot::Mutex;
+use parking_lot::RwLock;
 use pwnagotchi_core::{
-  agent::Agent,
-  ai::Epoch,
-  automata::Automata,
-  bettercap::{Bettercap, spawn_bettercap},
-  cli,
-  events::eventlistener::start_event_loop,
-  mesh::advertiser::{AsyncAdvertiser, start_advertising},
-  traits::bettercapcontroller::BettercapController,
-  voice::Voice,
+  agent::{Agent, AgentComponent},
+  automata::{Automata, AutomataComponent},
+  bettercap::{Bettercap, BettercapComponent},
+  cli::Cli,
+  events::eventlistener::EventListenerComponent,
+  grid::Grid,
+  mesh::advertiser::AdvertiserComponent,
+  setup::SetupComponent,
 };
-use pwnagotchi_hw::display::base::get_display_from_config;
+use pwnagotchi_plugins::managers::plugin_manager::PluginManager;
+use pwnagotchi_rs::components::manager::ComponentManager;
 use pwnagotchi_shared::{
-  config::{config, init_config},
-  identity::Identity,
+  config::{config_read, init_config},
+  identity::{Identity, IdentityComponent},
   logger::LOGGER,
   sessions::manager::SessionManager,
-  traits::{automata::AgentObserver, ui::ViewTrait, voice::VoiceTrait},
+  traits::{
+    agent::AgentTrait,
+    automata::AutomataTrait,
+    bettercap::BettercapTrait,
+    epoch::Epoch,
+    events::EventBus,
+    general::{Component, CoreModules},
+    grid::GridTrait,
+    ui::ViewTrait,
+  },
+  types::events::EventPayload,
 };
 use pwnagotchi_ui::{
-  ui::{refresher::start_sessionfetcher, view::View},
-  web::server::Server,
+  ui::{
+    refresher::RefresherComponent,
+    view::{View, ViewComponent},
+  },
+  web::server::{Server, build_router},
 };
 
 #[derive(Parser, Debug)]
-struct Cli {
+struct CliArgs {
   #[clap(
     short = 'C',
     long = "config",
@@ -38,8 +51,13 @@ struct Cli {
     help = "The configuration file to use"
   )]
   config: String,
-  #[clap(short = 'l', long = "log-level", default_value = "info", help = "The log level to use")]
-  log_level: String,
+  #[clap(
+    short = 'D',
+    long = "device",
+    default_value = "dev",
+    help = "Start Pwnagotchi in the specified mode (dev, pi, portable)"
+  )]
+  device: String,
   #[clap(
     short = 'm',
     long = "manual",
@@ -59,21 +77,9 @@ struct Cli {
   skip: bool,
 }
 
-pub struct PwnContext {
-  pub agent: Arc<Agent>,
-  pub session_manager: Arc<SessionManager>,
-  pub view: Arc<dyn ViewTrait + Send + Sync>,
-  pub epoch: Arc<Mutex<Epoch>>,
-  pub identity: Arc<Identity>,
-  pub bettercap: Arc<Bettercap>,
-  pub bc_controller: Arc<dyn BettercapController>,
-  pub automata: Arc<dyn AgentObserver + Send + Sync>,
-  pub advertiser: Arc<Mutex<AsyncAdvertiser>>,
-}
-
 #[tokio::main]
-async fn main() {
-  let cli = Cli::parse();
+async fn main() -> anyhow::Result<()> {
+  let cli = CliArgs::parse();
 
   if cli.clear {
     println!("\x1B[2J\x1B[1;1H");
@@ -89,119 +95,123 @@ async fn main() {
   init_config(&cli.config);
 
   if cli.print_config {
-    println!("Configuration: {:?}", config());
+    println!("Configuration: {:?}", config_read());
     exit(EXIT_SUCCESS);
   }
 
-  let ctx = Arc::new(build_context().await);
+  // Create Managers
+  let plugin_manager_inner = PluginManager::new();
+  let event_bus = plugin_manager_inner.event_bus();
+  let plugin_manager = Arc::new(RwLock::new(plugin_manager_inner));
+  let mut component_manager = ComponentManager::new();
 
-  // Render Changes to UI
-  let ctx_clone = Arc::clone(&ctx);
+  // Build CoreModules
+  let core_modules = build_coremodules(event_bus.clone());
+
+  // Set CoreModules for Components
+  component_manager.set_core_modules(Arc::clone(&core_modules));
+
+  // Initialize Plugins
+  plugin_manager.write().init();
+  plugin_manager.write().set_core_modules(Arc::clone(&core_modules));
+  plugin_manager.write().load_plugins();
+  plugin_manager.write().initialize_plugins();
+
+  // Immediately emit starting plugin event
+  let event = Arc::clone(&core_modules.events);
   tokio::task::spawn(async move {
-    ctx_clone.view.start_render_loop().await;
+    let _ = event.emit_payload("starting", EventPayload::empty()).await;
   });
 
-  // Fetch Session data for UI
-  let ctx_clone = Arc::clone(&ctx);
-  tokio::task::spawn(async move {
-    start_sessionfetcher(&ctx_clone.session_manager, &ctx_clone.view).await;
-  });
-
-  // Bettercap Event Websocket
-  let ctx_clone = Arc::clone(&ctx);
-  let bettercap = Arc::clone(&ctx_clone.bettercap);
-  tokio::task::spawn(async move {
-    bettercap.run_websocket().await;
-  });
-
-  // Event Listener
-  let ctx_clone = Arc::clone(&ctx);
-  tokio::task::spawn(async move {
-    start_event_loop(
-      &ctx_clone.session_manager,
-      &ctx_clone.bc_controller,
-      &ctx_clone.epoch,
-      &ctx_clone.view,
-    )
-    .await;
-  });
-
-  // WEB UI
-  let ctx_clone = Arc::clone(&ctx);
-  tokio::task::spawn(async move {
-    Server::new().start(&ctx_clone.session_manager, &ctx_clone.identity);
-  });
-
-  // Advertiser
-  let ctx_clone = Arc::clone(&ctx);
-  tokio::task::spawn(async move {
-    start_advertising(&ctx_clone.advertiser, &ctx_clone.session_manager, &ctx_clone.view).await;
-  });
-
-  let ctx_clone = Arc::clone(&ctx);
-  LOGGER.log_info(
-    "Pwnagotchi",
-    &format!(
-      "Pwnagotchi {}@{} (v{})",
-      config().main.name,
-      ctx_clone.identity.fingerprint(),
-      env!("CARGO_PKG_VERSION")
-    ),
+  // Build Router and Start WebServer
+  let router = build_router(
+    Arc::clone(&core_modules.session_manager),
+    Arc::clone(&core_modules.identity),
+    Arc::clone(&plugin_manager),
+    Arc::clone(&core_modules.grid),
   );
+  tokio::task::spawn(async move {
+    let _ = Server::new(router).start_server().await;
+  });
 
-  if cli.manual {
-    cli::do_manual_mode(&ctx_clone.session_manager, &ctx_clone.agent).await;
-  } else {
-    cli::do_auto_mode(
-      &ctx_clone.session_manager,
-      &ctx_clone.bc_controller,
-      &ctx_clone.agent,
-      &ctx_clone.automata,
-    )
-    .await;
-  };
+  LOGGER.log_debug("Pwnagotchi", "Loading Components");
+
+  let components: Vec<Box<dyn Component + Send + Sync>> = vec![
+    Box::new(IdentityComponent::new()),
+    Box::new(BettercapComponent::new()),
+    Box::new(EventListenerComponent::new()),
+    Box::new(ViewComponent::new()),
+    Box::new(AgentComponent::new()),
+    Box::new(AutomataComponent::new()),
+    Box::new(AdvertiserComponent::new()),
+    Box::new(RefresherComponent::new()),
+    Box::new(SetupComponent::new()),
+  ];
+
+  for component in components {
+    component_manager.register(component);
+  }
+
+  let _ = component_manager.init_all().await;
+  let _ = component_manager.start_all().await;
+
+  let plug_manager = Arc::clone(&plugin_manager);
+
+  // Cli Routines have to go last ALWAYS
+  let controller = Cli::new(Arc::clone(&core_modules));
+
+  tokio::task::spawn(async move {
+    if cli.manual {
+      controller.do_manual_mode().await;
+    } else {
+      controller.do_auto_mode().await;
+    }
+  });
+
+  tokio::select! {
+    _ = tokio::signal::ctrl_c() => {
+      LOGGER.log_info("Pwnagotchi", "Shutting down...");
+      let _ = plug_manager.write().shutdown_all();
+      component_manager.shutdown().await;
+    },
+  }
+  Ok(())
 }
 
-async fn build_context() -> PwnContext {
-  let identity = Arc::new(Identity::new());
-  let epoch = Arc::new(parking_lot::Mutex::new(Epoch::new()));
-  let voice: Arc<dyn VoiceTrait + Send + Sync> = Arc::new(Voice::new());
-  let view: Arc<dyn ViewTrait + Send + Sync> =
-    Arc::new(View::new(&get_display_from_config(), &voice));
-  let sm = Arc::new(SessionManager::new(&view));
+fn build_coremodules(events: Arc<dyn EventBus>) -> Arc<CoreModules> {
+  let identity = Arc::new(RwLock::new(Identity::new()));
+  let session_manager = Arc::new(SessionManager::new());
+  let epoch = Arc::new(RwLock::new(Epoch::new()));
+  let bettercap = Arc::new(Bettercap::new()) as Arc<dyn BettercapTrait + Send + Sync>;
 
-  // PERSONALITY
-  let automata: Arc<dyn AgentObserver + Send + Sync> =
-    Arc::new(Automata::new(Arc::clone(&epoch), Arc::clone(&view)));
-  let auto_handle = Arc::clone(&automata);
-
-  // BETTERCAP
-  let bettercap = Arc::new(Bettercap::new());
-  let bc_controller: Arc<dyn BettercapController> = Arc::new(spawn_bettercap(&bettercap));
-
-  // AGENT
-  let agent_bc = Arc::clone(&bc_controller);
-  let agent = Arc::new(Agent::new(&auto_handle, &agent_bc, &epoch, &view));
-
-  // ADVERTISER
-  let advertiser_view = Arc::clone(&view);
-  let adv = Arc::new(Mutex::new(AsyncAdvertiser::new(
+  let view = Arc::new(View::new(Arc::clone(&epoch))) as Arc<dyn ViewTrait + Send + Sync>;
+  let automata = Arc::new(Automata::new(
     Arc::clone(&epoch),
-    &identity,
-    Some(advertiser_view),
-  )));
+    Arc::clone(&events),
+    Arc::clone(&view) as Arc<dyn ViewTrait + Send + Sync>,
+  )) as Arc<dyn AutomataTrait + Send + Sync>;
 
-  PwnContext {
-    agent,
-    session_manager: sm,
-    view,
-    epoch,
-    identity,
-    bettercap,
-    bc_controller,
-    automata,
-    advertiser: adv,
-  }
+  let agent = Arc::new(Agent::new(
+    Arc::clone(&automata),
+    Arc::clone(&bettercap),
+    Arc::clone(&epoch),
+    Arc::clone(&view),
+    Arc::clone(&session_manager),
+  )) as Arc<dyn AgentTrait + Send + Sync>;
+
+  let grid = Arc::new(Grid::new()) as Arc<dyn GridTrait + Send + Sync>;
+
+  Arc::new(CoreModules {
+    session_manager: Arc::clone(&session_manager),
+    identity: Arc::clone(&identity),
+    epoch: Arc::clone(&epoch),
+    bettercap: Arc::clone(&bettercap),
+    view: Arc::clone(&view),
+    agent: Arc::clone(&agent),
+    automata: Arc::clone(&automata),
+    grid: Arc::clone(&grid),
+    events,
+  })
 }
 
 pub const fn version() -> &'static str {

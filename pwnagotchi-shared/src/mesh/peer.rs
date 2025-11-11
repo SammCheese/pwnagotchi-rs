@@ -3,7 +3,7 @@ use std::fmt::Debug;
 use time::OffsetDateTime;
 
 use crate::{
-  config::config,
+  config::config_read,
   logger::LOGGER,
   models::grid::{Advertisement, PeerResponse},
 };
@@ -104,7 +104,7 @@ impl Peer {
   }
 
   pub fn is_good_friend(&self) -> bool {
-    self.encounters >= config().personality.bond_encounters_factor
+    self.encounters >= config_read().personality.bond_encounters_factor
   }
 
   pub fn face(&self) -> String {

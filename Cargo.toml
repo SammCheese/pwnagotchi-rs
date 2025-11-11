@@ -9,41 +9,63 @@ keywords = ["pwnagotchi", "auditing", "security", "networking", "AI"]
 categories = ["Networking", "Security", "AI"]
 
 
-[profile.release]
-debug = true
-
 [workspace]
 resolver = "2"
-members = ["pwnagotchi-core", "pwnagotchi-ui", "pwnagotchi-hw", "pwnagotchi-rs", "pwnagotchi-shared"]
+members = [
+  "pwnagotchi-core", 
+  "pwnagotchi-ui", 
+  "pwnagotchi-hw", 
+  "pwnagotchi-rs", 
+  "pwnagotchi-shared", 
+  "pwnagotchi-plugins",
+  "pwnagotchi-macros",
+  "pwnagotchi-plugin-dev",
+  "pwnagotchi-plugin-dev/src/examples/*",
+  "pwnagotchi-plugin-dev/src/plugins/*",
+  "pwnagotchi-plugin-dev/src/defaults/*",
+]
+exclude = [
+  "pwnagotchi-plugin-dev/target",
+]
+
 
 [workspace.dependencies]
-tokio = { version = "1.47.1", features = ["time", "rt-multi-thread", "process"] }
+pwnagotchi-shared = { path = "pwnagotchi-shared" }
+pwnagotchi-plugins = { path = "pwnagotchi-plugins" }
+pwnagotchi-macros = { path = "pwnagotchi-macros" }
+
+tokio = { version = "1.48.0", features = ["time", "rt-multi-thread", "process", "signal", "sync"] }
 tokio-stream = { version = "0.1.17", features = ["io-util"] }
 futures-util = { version = "0.3.31", default-features = false, features = ["sink"] }
-serde = { version = "1.0.219", features = ["derive"] }
-tokio-tungstenite = "0.27.0"
-serde_json = "1.0.143"
-ureq = { version = "3.1.2", features = ["json"] }
+serde = { version = "1.0.228", features = ["derive"] }
+tokio-tungstenite = "0.28.0"
+serde_json = "1.0.145"
+ureq = { version = "3.1.4", features = ["json"] }
 fastrand = "2.3.0"
 
-toml = "0.9.5"
+
+toml = "0.9.8"
 async-trait = "0.1.89"
 
-anyhow = "1.0.99"
+anyhow = "1.0.100"
 once_cell = "1.21.3"
-parking_lot = "0.12.4"
+parking_lot = "0.12.5"
 
 base64 = "0.22.1"
 hex = "0.4.3"
 md5 = "0.8.0"
-regex = "1.11.2"
+regex = "1.12.2"
+uuid = "1.18.1"
 
 sysinfo = "0.37.0"
 
-time = {version = "0.3.43", features = ["formatting", "parsing", "macros", "serde"]}
+time = {version = "0.3.44", features = ["formatting", "parsing", "macros", "serde"]}
 
 png = "0.18.0"
 rgb = "0.8.52"
 tiny-skia = "0.11.4"
+
+inventory = "0.3.21"
+futures = "0.3.31"
 
 
