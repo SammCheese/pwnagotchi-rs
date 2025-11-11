@@ -3,156 +3,112 @@ use std::{sync::Arc, time::Duration};
 use anyhow::Result;
 use pwnagotchi_macros::hookable;
 use pwnagotchi_shared::{
-  logger::LOGGER,
-  models::agent::RunningMode,
-  sessions::manager::SessionManager,
-  traits::{
-    agent::AgentTrait,
-    automata::AutomataTrait,
-    bettercap::BettercapTrait,
-    general::{Component, CoreModules, Dependencies},
-  },
+  logger::LOGGER, models::agent::RunningMode, sessions::session_stats::SessionStats,
+  traits::general::CoreModules, types::events::EventPayload,
 };
-use tokio::{task::JoinHandle, time::sleep};
-
-pub struct CliComponent {
-  cli: Option<Arc<Cli>>,
-  manual: bool,
-}
-
-impl Dependencies for CliComponent {
-  fn name(&self) -> &'static str {
-    "CliComponent"
-  }
-  fn dependencies(&self) -> &[&str] {
-    &[
-      "SessionManager",
-      "Bettercap",
-      "Agent",
-      "Automata",
-    ]
-  }
-}
-
-#[async_trait::async_trait]
-impl Component for CliComponent {
-  async fn init(&mut self, ctx: &CoreModules) -> Result<()> {
-    let (sm, bc, agent, observer) =
-      (&ctx.session_manager, &ctx.bettercap, &ctx.agent, &ctx.automata);
-
-    let sm = Arc::clone(sm);
-    let bc = Arc::clone(bc);
-    let agent = Arc::clone(agent);
-    let observer = Arc::clone(observer);
-
-    let cli = Cli::new(sm, bc, agent, observer, self.manual);
-
-    self.cli = Some(Arc::new(cli));
-
-    Ok(())
-  }
-
-  async fn start(&self) -> Result<Option<JoinHandle<()>>> {
-    if let Some(cli) = &self.cli {
-      let cli = Arc::clone(cli);
-      let handle = tokio::spawn(async move {
-        if cli.manual {
-          cli.do_manual_mode().await;
-        } else {
-          cli.do_auto_mode().await;
-        }
-      });
-      Ok(Some(handle))
-    } else {
-      Ok(None)
-    }
-  }
-}
-
-impl CliComponent {
-  pub fn new(manual: bool) -> Self {
-    Self { cli: None, manual }
-  }
-}
+use tokio::time::sleep;
 
 pub struct Cli {
-  pub sm: Arc<SessionManager>,
-  pub bc: Arc<dyn BettercapTrait + Send + Sync>,
-  pub agent: Arc<dyn AgentTrait + Send + Sync>,
-  pub observer: Arc<dyn AutomataTrait + Send + Sync>,
-  pub manual: bool,
+  pub core: Arc<CoreModules>,
 }
 
 #[hookable]
 impl Cli {
-  pub fn new(
-    sm: Arc<SessionManager>,
-    bc: Arc<dyn BettercapTrait + Send + Sync>,
-    agent: Arc<dyn AgentTrait + Send + Sync>,
-    observer: Arc<dyn AutomataTrait + Send + Sync>,
-    manual: bool,
-  ) -> Self {
-    Self { sm, bc, agent, observer, manual }
+  pub fn new(core: Arc<CoreModules>) -> Self {
+    Self { core }
   }
 
   pub async fn do_auto_mode(&self) {
     LOGGER.log_info("Pwnagotchi", "Starting auto mode...");
 
-    self.agent.set_mode(RunningMode::Auto).await;
-    self.agent.start_pwnagotchi();
+    self.core.agent.set_mode(RunningMode::Auto).await;
+    self.core.session_manager.get_last_session().write().reparse();
+    self.core.agent.start_pwnagotchi();
 
     loop {
-      self.agent.recon().await;
+      self.core.agent.recon().await;
 
-      let aps = self.agent.get_access_points_by_channel().await;
+      let aps = self.core.agent.get_access_points_by_channel().await;
 
       for (ch, aps) in aps {
         sleep(Duration::from_secs(1)).await;
-        self.agent.set_channel(ch).await;
+        self.core.agent.set_channel(ch).await;
 
-        if !self.observer.is_stale() && self.observer.any_activity() {
+        if !self.core.automata.is_stale() && self.core.automata.any_activity() {
           LOGGER.log_info("Pwnagotchi", format!("{} APs on channel {ch}", aps.len()).as_str());
         }
 
         for ap in aps {
-          self.agent.associate(&ap, None).await;
+          self.core.agent.associate(&ap, None).await;
 
           for sta in &ap.clients {
-            self.agent.deauth(&ap, sta, None).await;
+            self.core.agent.deauth(&ap, sta, None).await;
             // Shoo Nexmon Bugs!
             sleep(Duration::from_secs(1)).await;
           }
         }
       }
 
-      self.observer.next_epoch();
+      self.core.automata.next_epoch();
+
+      if self.core.grid.is_connected() {
+        let last_session = &self.core.session_manager.get_last_session();
+
+        let Some(stats) = last_session.read().stats.clone() else {
+          LOGGER.log_debug("GRID", "No session stats available to upload.");
+          continue;
+        };
+
+        let _ = self
+          .core
+          .events
+          .emit_payload("internet_available", EventPayload::new::<SessionStats>(&stats).unwrap())
+          .await;
+        drop(stats);
+      }
     }
   }
 
-  #[hookable]
   pub async fn do_manual_mode(&self) {
     LOGGER.log_info("Pwnagotchi", "Starting in manual mode...");
-    self.agent.set_mode(RunningMode::Manual).await;
+    self.core.agent.set_mode(RunningMode::Manual).await;
+    self.core.session_manager.get_last_session().write().reparse();
 
     loop {
+      let last_session = &self.core.session_manager.get_last_session();
+      self.core.view.on_manual_mode(&last_session.read());
+
+      if self.core.grid.is_connected() {
+        if last_session.read().stats.is_none() {
+          LOGGER.log_debug("Pwnagotchi", "No session stats available to upload.");
+          continue;
+        }
+        let stats = &last_session.read().stats.clone();
+        let _ = self
+          .core
+          .events
+          .emit_payload(
+            "internet_available",
+            EventPayload::new::<SessionStats>(&stats.clone().unwrap()).unwrap(),
+          )
+          .await;
+      }
       sleep(Duration::from_secs(60)).await;
     }
   }
 
-  #[hookable]
   pub async fn do_custom_mode(&self, _mode: &str) {
     LOGGER.log_info("Pwnagotchi", "Starting in custom mode...");
-    self.agent.set_mode(RunningMode::Custom).await;
+    self.core.agent.set_mode(RunningMode::Custom).await;
 
     loop {
       sleep(Duration::from_secs(60)).await;
     }
   }
 
-  #[hookable]
   pub async fn do_ai_mode(&self) {
     LOGGER.log_info("Pwnagotchi", "Starting in AI mode...");
-    self.agent.set_mode(RunningMode::Ai).await;
+    self.core.agent.set_mode(RunningMode::Ai).await;
 
     loop {
       sleep(Duration::from_secs(60)).await;

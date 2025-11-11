@@ -5,7 +5,7 @@ use std::{
 
 use anyhow::{Result, anyhow};
 use pwnagotchi_shared::{
-  config::config,
+  config::config_read,
   logger::LOGGER,
   traits::general::{Component, CoreModule, CoreModules, Dependencies},
 };
@@ -123,7 +123,7 @@ impl ComponentManager {
       "Pwnagotchi",
       &format!(
         "Pwnagotchi {}@{} (v{}) starting...",
-        config().main.name,
+        config_read().main.name,
         &self.ctx.as_ref().unwrap().identity.read().fingerprint(),
         env!("CARGO_PKG_VERSION")
       ),

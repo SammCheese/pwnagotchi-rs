@@ -36,6 +36,13 @@ impl HookManager {
     if let Some(handles) = handles {
       for handle in handles {
         self.unregister_hook_internal(&handle)?;
+        LOGGER.log_debug(
+          "HOOKS",
+          &format!(
+            "Unregistered hook '{}' with ID {} for plugin '{}'",
+            handle.hook, handle.id, plugin
+          ),
+        );
       }
     }
 

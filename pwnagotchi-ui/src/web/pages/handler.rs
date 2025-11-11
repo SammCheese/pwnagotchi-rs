@@ -2,12 +2,13 @@ use std::sync::Arc;
 
 use askama::Template;
 use axum::{
-  extract::State,
+  body::Body,
+  extract::{Form, State},
   http::{StatusCode, header},
   response::{Html, IntoResponse, Response},
 };
 use pwnagotchi_plugins::managers::plugin_manager::PluginState;
-use pwnagotchi_shared::{config::config, models::agent::RunningMode};
+use pwnagotchi_shared::{config::config_read, models::agent::RunningMode};
 
 use crate::web::{
   frame::FRAME_PATH,
@@ -18,11 +19,11 @@ use crate::web::{
   server::WebUIState,
 };
 
-pub async fn index_handler() -> impl IntoResponse {
+pub async fn index_handler(State(state): State<Arc<WebUIState>>) -> impl IntoResponse {
   let tpl = IndexTemplate {
     base: make_base("Home", "home"),
     other_mode: if true { RunningMode::Auto.to_string() } else { RunningMode::Manual.to_string() },
-    fingerprint: "XXXX".to_string(),
+    fingerprint: state.identity.read().fingerprint().to_string(),
   };
   match tpl.render() {
     Ok(s) => Html(s).into_response(),
@@ -55,7 +56,7 @@ pub async fn new_message_handler() -> impl IntoResponse {
 pub async fn peers_handler() -> impl IntoResponse {
   let tpl = PeersTemplate {
     base: make_base("Peers", "peers"),
-    name: config().main.name.to_string(),
+    name: config_read().main.name.to_string(),
     peers: vec![],
   };
   match tpl.render() {
@@ -65,11 +66,12 @@ pub async fn peers_handler() -> impl IntoResponse {
 }
 
 pub async fn profile_handler(State(state): State<Arc<WebUIState>>) -> impl IntoResponse {
+  let grid_data = state.grid.get_advertisement_data();
   let tpl = ProfileTemplate {
     base: make_base("Profile", "profile"),
-    name: config().main.name.to_string(),
+    name: config_read().main.name.to_string(),
     fingerprint: state.identity.read().fingerprint().to_string(),
-    data: serde_json::json!({}),
+    data: serde_json::json!(grid_data),
   };
   match tpl.render() {
     Ok(s) => Html(s).into_response(),
@@ -120,6 +122,38 @@ pub async fn message_handler() -> impl IntoResponse {
   };
   match tpl.render() {
     Ok(s) => Html(s).into_response(),
+    Err(_e) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+  }
+}
+
+#[derive(serde::Deserialize)]
+pub struct ToggleForm {
+  plugin: String,
+  enabled: Option<String>,
+  #[allow(unused)]
+  csrf_token: String,
+}
+
+pub async fn toggle_handler(
+  State(state): State<Arc<WebUIState>>,
+  Form(form): Form<ToggleForm>,
+) -> impl IntoResponse {
+  let res = if form.enabled.is_some() {
+    let mut pm = state.pluginmanager.write();
+    pm.enable_plugin(&form.plugin)
+  } else {
+    let mut pm = state.pluginmanager.write();
+    pm.disable_plugin(&form.plugin)
+  };
+
+  match res {
+    Ok(_) => Response::builder()
+      .status(StatusCode::ACCEPTED)
+      .header(header::LOCATION, "/plugins")
+      .body(Body::empty())
+      .unwrap_or_else(|_| {
+        (StatusCode::INTERNAL_SERVER_ERROR, "Failed to build response").into_response()
+      }),
     Err(_e) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
   }
 }

@@ -1,26 +1,24 @@
 #![allow(clippy::cast_possible_truncation)]
 
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, mem, sync::Arc, time::Duration};
 
 use anyhow::Result;
 use parking_lot::{Mutex, RwLock};
 use pwnagotchi_shared::{
-  config::config,
+  config::config_read,
   identity::Identity,
-  logger::LOGGER,
   mesh::peer::Peer,
-  models::grid::Advertisement,
+  models::grid::{Advertisement, PeerResponse},
   sessions::manager::SessionManager,
   traits::{
     epoch::Epoch,
     general::{AdvertiserTrait, Component, CoreModule, CoreModules, Dependencies},
+    grid::GridTrait,
     ui::ViewTrait,
   },
   utils::general::total_unique_handshakes,
 };
-use tokio::{sync::Mutex as AsyncMutex, task::JoinHandle};
-
-use crate::grid::{advertise, peers, set_advertisement_data};
+use tokio::{sync::Mutex as AsyncMutex, task::JoinHandle, time::sleep};
 
 pub struct AdvertiserComponent {
   advertiser: Option<Arc<AsyncMutex<dyn AdvertiserTrait + Send + Sync>>>,
@@ -43,7 +41,14 @@ impl Dependencies for AdvertiserComponent {
 
 #[async_trait::async_trait]
 impl Component for AdvertiserComponent {
-  async fn init(&mut self, _ctx: &CoreModules) -> Result<()> {
+  async fn init(&mut self, ctx: &CoreModules) -> Result<()> {
+    self.advertiser = Some(Arc::new(AsyncMutex::new(AsyncAdvertiser::new(
+      Arc::clone(&ctx.identity),
+      Arc::clone(&ctx.epoch),
+      Arc::clone(&ctx.view),
+      Arc::clone(&ctx.grid),
+      Arc::clone(&ctx.session_manager),
+    ))));
     Ok(())
   }
 
@@ -52,7 +57,8 @@ impl Component for AdvertiserComponent {
       let advertiser = Arc::clone(ad);
       advertiser.lock().await.start_advertising().await;
       let advertiser = Arc::clone(ad);
-      let handle = tokio::spawn(async move { advertiser.lock().await.peer_poller().await });
+      let handle =
+        tokio::spawn(async move { advertiser.lock().await.peer_and_advertisement_updater().await });
       return Ok(Some(handle));
     }
     Ok(None)
@@ -76,6 +82,7 @@ pub struct AsyncAdvertiser {
   pub advertisement: Arc<Mutex<Advertisement>>,
   pub sm: Arc<SessionManager>,
   pub view: Arc<dyn ViewTrait + Send + Sync>,
+  pub grid: Arc<dyn GridTrait + Send + Sync>,
   pub peers: HashMap<String, Peer>,
   pub closest_peer: Option<String>,
 }
@@ -98,68 +105,37 @@ impl CoreModule for AsyncAdvertiser {
 #[async_trait::async_trait]
 impl AdvertiserTrait for AsyncAdvertiser {
   async fn start_advertising(&self) {
-    if !config().personality.advertise {
+    if !config_read().personality.advertise {
       return;
     }
     let ad = Arc::clone(&self.advertisement);
-    set_advertisement_data(serde_json::to_value(&*ad.lock()).unwrap_or_default());
-    advertise(Some(true));
+    // Rounding errors my behated
 
-    let clone = Arc::clone(&ad);
+    let serialized = {
+      let ad = ad.lock();
+      serde_json::to_value(&*ad).unwrap_or_default()
+    };
+
+    self.grid.set_advertisement_data(serialized);
+    self.grid.advertise(Some(true));
+
+    let grid = Arc::clone(&self.grid);
+
     self.view.on_state_change(
       "face",
-      Box::new(move |old: String, new: String| {
-        on_face_change(Arc::clone(&clone), old.clone(), new.clone())
+      Box::new(move |_old: String, new: String| {
+        on_face_change(Arc::clone(&grid), Arc::clone(&ad), new);
       }),
     );
   }
 
-  async fn peer_poller(&mut self) {
-    tokio::time::sleep(std::time::Duration::from_secs(20)).await;
+  async fn peer_and_advertisement_updater(&mut self) {
+    sleep(Duration::from_secs(20)).await;
     loop {
-      LOGGER.log_debug("GRID", "Polling pwngrid-peer for peers...");
-
-      let peers_opt = peers().await;
-      let mut new_peers = HashMap::new();
-      self.closest_peer = None;
-
-      if let Some(peers_vec) = peers_opt {
-        for p in &peers_vec {
-          let peer = Peer::new(p);
-          new_peers.insert(p.fingerprint.clone().unwrap_or_default(), peer.clone());
-          let is_closer = if let Some(ref closest) = self.closest_peer {
-            peer.rssi > self.peers.get(closest).map_or(-100, |p| p.rssi)
-          } else {
-            true
-          };
-          if is_closer {
-            self.closest_peer = Some(p.fingerprint.clone().unwrap_or_default());
-          }
-        }
-      }
-
-      let to_delete = self
-        .peers
-        .keys()
-        .filter(|k| !new_peers.contains_key(*k))
-        .cloned()
-        .collect::<Vec<_>>();
-
-      for k in to_delete {
-        if let Some(p) = self.peers.remove(&k) {
-          self.on_lost_peer(&p);
-        }
-      }
-
-      for (k, v) in &new_peers {
-        if !self.peers.contains_key(k) {
-          self.on_new_peer(v);
-        } else if let Some(existing_peer) = self.peers.get_mut(k) {
-          existing_peer.update(v);
-        }
-      }
-
-      tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+      let peers = self.grid.peers().await.unwrap_or_default();
+      self.merge_peers(peers);
+      self.update_advertisement().await;
+      sleep(Duration::from_secs(3)).await;
     }
   }
 }
@@ -169,25 +145,28 @@ impl AsyncAdvertiser {
     identity: Arc<RwLock<Identity>>,
     epoch: Arc<RwLock<Epoch>>,
     view: Arc<dyn ViewTrait + Send + Sync>,
+    grid: Arc<dyn GridTrait + Send + Sync>,
     sm: Arc<SessionManager>,
   ) -> Self {
     let epoch_data = Arc::clone(&epoch);
 
     let (epoch_num, epoch_handshakes) = {
       let e = epoch_data.read();
-      (e.epoch as u32, e.num_handshakes)
+      (e.epoch, e.num_handshakes)
     };
 
+    let config = config_read();
+
     let advertisement = Advertisement {
-      name: config().main.name.to_string(),
+      name: config.main.name.to_string(),
       version: env!("CARGO_PKG_VERSION").to_string(),
       identity: identity.read().fingerprint().to_string(),
-      face: config().faces.friend.to_string(),
+      face: config.faces.friend.to_string(),
       pwnd_run: epoch_handshakes,
       pwnd_total: 0,
       uptime: 0,
       epoch: epoch_num,
-      policy: config().personality.clone(),
+      policy: config.personality.clone(),
     };
     let adv_lock = Arc::new(Mutex::new(advertisement));
 
@@ -196,6 +175,7 @@ impl AsyncAdvertiser {
       view,
       advertisement: adv_lock,
       sm,
+      grid,
       peers: HashMap::new(),
       closest_peer: None,
     }
@@ -210,17 +190,19 @@ impl AsyncAdvertiser {
     let session = self.sm.get_session();
     let ad_arc = Arc::clone(&self.advertisement);
     let mut ad_mut = ad_arc.lock();
+    let uptime = self.sm.get_session().read().started_at.elapsed();
+
     ad_mut.pwnd_run = session.read().state.handshakes.len() as u32;
-    ad_mut.pwnd_total = total_unique_handshakes(&config().bettercap.handshakes) as u32;
-    ad_mut.uptime = 0;
-    ad_mut.epoch = self.epoch.read().epoch as u32;
+    ad_mut.pwnd_total = total_unique_handshakes(&config_read().bettercap.handshakes) as u32;
+    ad_mut.uptime = uptime.unwrap_or_default().as_secs() as u32;
+    ad_mut.epoch = self.epoch.read().epoch;
 
     drop(ad_mut);
 
     let advertisement = Arc::clone(&self.advertisement);
 
     let ad = advertisement.lock();
-    set_advertisement_data(serde_json::to_value(&*ad).unwrap_or_default());
+    self.grid.set_advertisement_data(serde_json::to_value(&*ad).unwrap_or_default());
   }
 
   pub fn cumulative_encounters(&self) -> u32 {
@@ -234,14 +216,53 @@ impl AsyncAdvertiser {
   fn on_lost_peer(&self, peer: &Peer) {
     self.view.on_lost_peer(peer);
   }
+
+  fn merge_peers(&mut self, responses: Vec<PeerResponse>) {
+    let mut previous_peers = mem::take(&mut self.peers);
+    // Track peers seen in this poll to detect joins, updates, and departures.
+    let mut updated_peers = HashMap::with_capacity(responses.len());
+    let mut closest: Option<(String, i16)> = None;
+
+    for response in responses {
+      let Some(fingerprint) = response.fingerprint.clone() else {
+        continue;
+      };
+
+      let mut peer = Peer::new(&response);
+
+      if let Some(mut existing) = previous_peers.remove(&fingerprint) {
+        existing.update(&peer);
+        peer = existing;
+      } else {
+        self.on_new_peer(&peer);
+      }
+
+      if closest.as_ref().is_none_or(|(_, rssi)| peer.rssi > *rssi) {
+        closest = Some((fingerprint.clone(), peer.rssi));
+      }
+
+      updated_peers.insert(fingerprint, peer);
+    }
+
+    for lost_peer in previous_peers.into_values() {
+      self.on_lost_peer(&lost_peer);
+    }
+
+    self.closest_peer = closest.map(|(fingerprint, _)| fingerprint);
+    self.peers = updated_peers;
+  }
 }
 
-fn on_face_change(ad: Arc<Mutex<Advertisement>>, _old: String, new: String) {
+fn on_face_change(
+  grid: Arc<dyn GridTrait + Send + Sync>,
+  ad: Arc<Mutex<Advertisement>>,
+  new: String,
+) {
   let ad = Arc::clone(&ad);
   let mut ad_mut = ad.lock();
-  ad_mut.face = new.clone();
+  ad_mut.face = new;
   drop(ad_mut);
 
   let advertisement = Arc::clone(&ad);
-  set_advertisement_data(serde_json::to_value(&*advertisement.lock()).unwrap_or_default());
+  grid.set_advertisement_data(serde_json::to_value(&*advertisement.lock()).unwrap_or_default());
 }

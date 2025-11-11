@@ -4,7 +4,7 @@ use anyhow::Result;
 use parking_lot::{Mutex, RwLock};
 use pwnagotchi_hw::display::base::{DisplayTrait, get_display_from_config};
 use pwnagotchi_shared::{
-  config::config,
+  config::config_read,
   logger::LOGGER,
   mesh::peer::Peer,
   models::net::{AccessPoint, Station},
@@ -15,7 +15,7 @@ use pwnagotchi_shared::{
     ui::{ViewTrait, Widget},
   },
   types::ui::FaceType,
-  utils::general::{format_duration_human, has_support_network_for, total_unique_handshakes},
+  utils::general::{has_support_network_for, total_unique_handshakes},
   voice::{
     custom, default_line, on_angry, on_assoc, on_awakening, on_bored, on_deauth, on_demotivated,
     on_excited, on_free_channel, on_grateful, on_handshakes, on_keys_generation,
@@ -112,7 +112,7 @@ impl CoreModule for View {
 
 impl View {
   pub fn new(epoch: Arc<RwLock<Epoch>>) -> Self {
-    let inverted = config().ui.inverted;
+    let inverted = config_read().ui.inverted;
     let background_color = if inverted { BLACK } else { WHITE };
     let foreground_color = if inverted { WHITE } else { BLACK };
 
@@ -141,7 +141,7 @@ impl View {
   }
 
   pub fn configure_render_settings(&mut self) {
-    if config().ui.fps < 1.0 {
+    if config_read().ui.fps < 1.0 {
       self.ignore_changes.push("uptime");
       self.ignore_changes.push("name");
 
@@ -184,7 +184,7 @@ impl View {
 #[async_trait::async_trait]
 impl ViewTrait for View {
   async fn start_render_loop(&self) {
-    let delay = 1.0 / f64::from(config().ui.fps);
+    let delay = 1.0 / f64::from(config_read().ui.fps);
     loop {
       self.update(None, None);
       tokio::time::sleep(Duration::from_secs_f64(delay)).await;
@@ -262,8 +262,7 @@ impl ViewTrait for View {
 
     self.set("status", on_last_session_data(last_session));
     self.set("epoch", session.epochs.epochs.to_string());
-    let duration = Duration::from_secs(session.duration_secs.unwrap_or(0));
-    self.set("uptime", format_duration_human(duration));
+    self.set("uptime", session.duration_human().unwrap_or("00:00:00".to_string()));
     self.set("channel", "-".into());
     self.set("aps", session.associated.to_string());
     self.set(
@@ -271,7 +270,7 @@ impl ViewTrait for View {
       format!(
         "{} ({:02})",
         session.handshakes,
-        total_unique_handshakes(&config().bettercap.handshakes)
+        total_unique_handshakes(&config_read().bettercap.handshakes)
       ),
     );
 
@@ -693,7 +692,7 @@ fn make_friend_name_widget(pos: (u32, u32), fontname: &str, color: Rgba<u8>) -> 
 fn make_name_widget(pos: (u32, u32), fontname: &str, color: Rgba<u8>) -> TextWidget {
   TextWidget::new(
     pos,
-    format!("{}>", config().main.name),
+    format!("{}>", config_read().main.name),
     TextStyle {
       font: fontname.to_string(),
       color,

@@ -5,6 +5,7 @@ use std::{
 };
 
 use pwnagotchi_shared::{
+  config::config_write,
   logger::LOGGER,
   traits::{events::EventBus, general::CoreModules},
   types::events::EventPayload,
@@ -38,7 +39,6 @@ pub enum PluginState {
 
 pub struct PluginEntry {
   pub plugin: Box<dyn Plugin>,
-  #[allow(dead_code)]
   pub id: String,
   pub state: PluginState,
   pub error: Option<String>,
@@ -123,20 +123,37 @@ impl PluginManager {
     });
   }
 
-  pub fn enable_plugin(
-    &mut self,
-    loader: &mut dyn PluginLoader,
-    name: &str,
-  ) -> Result<(), Box<dyn Error>> {
-    loader.enable_plugin(name)
+  pub fn enable_plugin(&mut self, name: &str) -> Result<(), Box<dyn Error>> {
+    for loader in &mut self.loaders {
+      if loader.get_plugins().iter().any(|p| p.plugin.info().name == name) {
+        loader.enable_plugin(name)?;
+        self.set_plugin_state(name, true);
+        return Ok(());
+      }
+    }
+    Err("Plugin not found".into())
   }
 
-  pub fn disable_plugin(
-    &mut self,
-    loader: &mut dyn PluginLoader,
-    name: &str,
-  ) -> Result<(), Box<dyn Error>> {
-    loader.disable_plugin(name)
+  pub fn disable_plugin(&mut self, name: &str) -> Result<(), Box<dyn Error>> {
+    for loader in &mut self.loaders {
+      if loader.get_plugins().iter().any(|p| p.plugin.info().name == name) {
+        loader.disable_plugin(name)?;
+        self.set_plugin_state(name, false);
+        return Ok(());
+      }
+    }
+    Err("Plugin not found".into())
+  }
+
+  pub fn set_plugin_state(&self, name: &str, enabled: bool) {
+    let mut config = config_write();
+    let plugin_config = config.plugins.entry(name.to_string()).or_default();
+
+    plugin_config.enabled = enabled;
+
+    if plugin_config.config == Some(serde_json::Value::Null) {
+      plugin_config.config = Some(serde_json::json!({}));
+    }
   }
 
   pub fn shutdown_all(&mut self) -> Result<(), Box<dyn Error>> {

@@ -82,7 +82,7 @@ $(function(){
                 </h4>
                 {% match p.description %}
                   {% when Some with (desc) %}<span class="tooltiptext">{{ desc }}</span>
-                  {% when None %}<span class="tooltiptext">Description can't be loaded yet.</span>
+                  {% when None %}<span class="tooltiptext">No Description available.</span>
                 {% endmatch %}
             </div>
             <form method="POST" action="/plugins/toggle">

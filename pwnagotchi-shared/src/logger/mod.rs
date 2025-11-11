@@ -7,7 +7,7 @@ use std::{
 
 use time::OffsetDateTime;
 
-use crate::config::config;
+use crate::config::config_read;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum LogLevel {
@@ -110,7 +110,7 @@ impl Log {
 }
 
 pub static LOGGER: std::sync::LazyLock<Log> = std::sync::LazyLock::new(|| {
-  let cfg = config();
+  let cfg = config_read();
   let log = Log::new(&cfg.log.path, &cfg.log.path_debug);
   log.log(None, "=========== STARTED ===========", LogLevel::Info);
   log

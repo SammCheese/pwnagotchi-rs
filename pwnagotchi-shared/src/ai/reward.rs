@@ -2,7 +2,7 @@ use crate::{traits::epoch::EpochData, utils::wifi};
 
 const NOZERO: f64 = 1e-20;
 
-pub fn calculate_reward(epoch: u64, state: &EpochData) -> f64 {
+pub fn calculate_reward(epoch: u32, state: &EpochData) -> f64 {
   #[allow(clippy::cast_precision_loss)]
   let tot_epochs = epoch as f64 + NOZERO;
 

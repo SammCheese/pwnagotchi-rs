@@ -2,8 +2,9 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use parking_lot::RwLock;
+use pwnagotchi_macros::hookable;
 use pwnagotchi_shared::{
-  config::config,
+  config::config_read,
   logger::LOGGER,
   models::net::AccessPoint,
   traits::{
@@ -69,6 +70,7 @@ pub struct Automata {
   pub view: Arc<dyn ViewTrait + Send + Sync>,
 }
 
+#[hookable]
 impl Automata {
   pub const fn new(
     epoch: Arc<RwLock<Epoch>>,
@@ -77,10 +79,7 @@ impl Automata {
   ) -> Self {
     Self { epoch, eventbus, view }
   }
-}
 
-#[async_trait::async_trait]
-impl AutomataTrait for Automata {
   fn on_miss(&self, who: &AccessPoint) {
     LOGGER.log_info("Personality", "Missed an interaction :(");
     self.view.on_miss(who);
@@ -129,8 +128,8 @@ impl AutomataTrait for Automata {
   }
 
   fn set_bored(&self) {
-    let factor =
-      f64::from(self.epoch.read().inactive_for) / f64::from(config().personality.bored_num_epochs);
+    let factor = f64::from(self.epoch.read().inactive_for)
+      / f64::from(config_read().personality.bored_num_epochs);
     #[allow(clippy::cast_possible_truncation)]
     if has_support_network_for(factor as f32, &self.epoch) {
       LOGGER.log_info("Personality", "Unit is grateful instead of bored");
@@ -142,8 +141,8 @@ impl AutomataTrait for Automata {
   }
 
   fn set_sad(&self) {
-    let factor =
-      f64::from(self.epoch.read().inactive_for) / f64::from(config().personality.sad_num_epochs);
+    let factor = f64::from(self.epoch.read().inactive_for)
+      / f64::from(config_read().personality.sad_num_epochs);
 
     #[allow(clippy::cast_possible_truncation)]
     if has_support_network_for(factor as f32, &self.epoch) {
@@ -186,7 +185,7 @@ impl AutomataTrait for Automata {
   }
 
   fn is_stale(&self) -> bool {
-    self.epoch.read().num_missed > config().personality.max_misses_for_recon
+    self.epoch.read().num_missed > config_read().personality.max_misses_for_recon
   }
 
   fn any_activity(&self) -> bool {
@@ -208,7 +207,7 @@ impl AutomataTrait for Automata {
     };
 
     if was_stale {
-      let factor = f64::from(did_miss) / f64::from(config().personality.max_misses_for_recon);
+      let factor = f64::from(did_miss) / f64::from(config_read().personality.max_misses_for_recon);
 
       #[allow(clippy::cast_possible_truncation)]
       let factor = factor as f32;
@@ -224,7 +223,7 @@ impl AutomataTrait for Automata {
         self.set_lonely();
       }
     } else if sad_for > 0 {
-      let factor = f64::from(sad_for) / f64::from(config().personality.sad_num_epochs);
+      let factor = f64::from(sad_for) / f64::from(config_read().personality.sad_num_epochs);
 
       if factor >= 2.0 {
         #[allow(clippy::cast_possible_truncation)]
@@ -234,7 +233,7 @@ impl AutomataTrait for Automata {
       }
     } else if bored_for > 0 {
       self.set_bored();
-    } else if active_for >= config().personality.excited_num_epochs {
+    } else if active_for >= config_read().personality.excited_num_epochs {
       self.set_excited();
     } else if active_for >= 5 && has_support_network_for(5.0, &self.epoch) {
       self.set_grateful();
@@ -250,5 +249,72 @@ impl AutomataTrait for Automata {
       //self.restart();
       self.epoch.write().blind_for = 0;
     }
+  }
+}
+
+#[async_trait::async_trait]
+impl AutomataTrait for Automata {
+  fn on_miss(&self, who: &AccessPoint) {
+    self.on_miss(who);
+  }
+
+  fn on_error(&self, who: &AccessPoint, error: &str) {
+    self.on_error(who, error);
+  }
+
+  fn set_rebooting(&self) {
+    self.set_rebooting();
+  }
+
+  fn set_starting(&self) {
+    self.set_starting();
+  }
+
+  fn set_ready(&self) {
+    self.set_ready();
+  }
+
+  fn in_good_mood(&self) -> bool {
+    self.in_good_mood()
+  }
+
+  fn set_grateful(&self) {
+    self.set_grateful();
+  }
+
+  fn set_lonely(&self) {
+    self.set_lonely();
+  }
+
+  fn set_bored(&self) {
+    self.set_bored();
+  }
+
+  fn set_sad(&self) {
+    self.set_sad();
+  }
+
+  fn set_angry(&self, factor: f32) {
+    self.set_angry(factor);
+  }
+
+  fn set_excited(&self) {
+    self.set_excited();
+  }
+
+  async fn wait_for(&self, duration: u32, sleeping: Option<bool>) {
+    self.wait_for(duration, sleeping).await;
+  }
+
+  fn is_stale(&self) -> bool {
+    self.is_stale()
+  }
+
+  fn any_activity(&self) -> bool {
+    self.any_activity()
+  }
+
+  fn next_epoch(&self) {
+    self.next_epoch();
   }
 }

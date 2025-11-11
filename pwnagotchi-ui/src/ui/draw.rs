@@ -5,7 +5,7 @@
   clippy::cast_sign_loss
 )]
 
-use cosmic_text::{Attrs, Buffer, Color, Family, Metrics, Shaping, Weight};
+use cosmic_text::{Align, Attrs, Buffer, Color, Family, Metrics, Shaping, Weight};
 use pwnagotchi_shared::logger::LOGGER;
 use rgb::Rgba;
 use tiny_skia::{BlendMode, Paint, PixmapMut as RgbaImage, Rect, Transform};
@@ -72,7 +72,7 @@ pub fn draw_text_mut(
   let mut attrs = Attrs::new().family(Family::Name(&resolved_family));
   attrs = attrs.weight(style);
 
-  buffer.set_text(content, &attrs, Shaping::Advanced);
+  buffer.set_text(content, &attrs, Shaping::Advanced, Some(Align::Left));
   buffer.shape_until_scroll(true);
 
   let base_color = Color::rgba(color.r, color.g, color.b, color.a);

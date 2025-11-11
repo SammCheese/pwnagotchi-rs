@@ -77,7 +77,6 @@ fn parse_session(content: &str, view: Option<&Arc<dyn ViewTrait + Send + Sync>>)
     view.on_reading_logs(0);
   }
 
-  stats.finalize();
   stats
 }
 

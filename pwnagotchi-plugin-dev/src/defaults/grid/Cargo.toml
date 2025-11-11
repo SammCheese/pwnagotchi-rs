@@ -1,0 +1,16 @@
+[package]
+name = "grid"
+version = "1.0.0"
+edition = "2024"
+description = "Signal the Identity, Pwned Networks and Networks to opwngrid.xyz"
+authors = ["Sammy <sammy@sammcheese.net>"]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+pwnagotchi-plugins = { workspace = true }
+pwnagotchi-shared = { workspace = true }
+pwnagotchi-macros = { workspace = true }
+
+regex = "1.12.2"

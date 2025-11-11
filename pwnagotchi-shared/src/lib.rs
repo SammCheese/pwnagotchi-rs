@@ -11,6 +11,7 @@ pub mod traits {
   pub mod epoch;
   pub mod events;
   pub mod general;
+  pub mod grid;
   pub mod logger;
   pub mod plugins;
   pub mod ui;
@@ -19,6 +20,7 @@ pub mod traits {
 pub mod types {
   pub mod epoch;
   pub mod events;
+  pub mod grid;
   pub mod hooks;
   pub mod ui;
 }

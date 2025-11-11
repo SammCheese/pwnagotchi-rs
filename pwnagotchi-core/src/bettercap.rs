@@ -11,7 +11,7 @@ use anyhow::Result;
 use base64::{Engine, engine::general_purpose};
 use futures_util::{SinkExt, StreamExt};
 use pwnagotchi_shared::{
-  config::config,
+  config::config_read,
   logger::LOGGER,
   models::bettercap::BettercapSession,
   traits::{
@@ -154,8 +154,8 @@ fn bettercap_add_authorization(
   mut req: Request<SendBody>,
   next: MiddlewareNext,
 ) -> Result<Response<Body>, ureq::Error> {
-  let username = config().bettercap.username.to_string();
-  let password = config().bettercap.password.to_string();
+  let username = config_read().bettercap.username.to_string();
+  let password = config_read().bettercap.password.to_string();
   let b64 = general_purpose::STANDARD.encode(format!("{username}:{password}"));
   req
     .headers_mut()
@@ -165,8 +165,8 @@ fn bettercap_add_authorization(
 
 impl Bettercap {
   pub fn new() -> Self {
-    let scheme = if config().bettercap.port == 443 { "https" } else { "http" };
-    let ws_scheme = if config().bettercap.port == 443 { "wss" } else { "ws" };
+    let scheme = if config_read().bettercap.port == 443 { "https" } else { "http" };
+    let ws_scheme = if config_read().bettercap.port == 443 { "wss" } else { "ws" };
     let max_queue = 10_000usize;
     let (event_tx, _rx) = broadcast::channel(max_queue);
 
@@ -183,25 +183,25 @@ impl Bettercap {
       max_queue,
       min_sleep: 0.5,
       max_sleep: 5.0,
-      hostname: Cow::Borrowed(&config().bettercap.hostname),
-      port: config().bettercap.port,
-      username: Cow::Borrowed(&config().bettercap.username),
-      password: Cow::Borrowed(&config().bettercap.password),
+      hostname: config_read().bettercap.hostname.clone(),
+      port: config_read().bettercap.port,
+      username: config_read().bettercap.username.clone(),
+      password: config_read().bettercap.password.clone(),
       url: format!(
         "{}://{}:{}@{}:{}/api",
         scheme,
-        config().bettercap.username,
-        config().bettercap.password,
-        config().bettercap.hostname,
-        config().bettercap.port
+        config_read().bettercap.username,
+        config_read().bettercap.password,
+        config_read().bettercap.hostname,
+        config_read().bettercap.port
       ),
       websocket_url: format!(
         "{}://{}:{}@{}:{}/api/events",
         ws_scheme,
-        config().bettercap.username,
-        config().bettercap.password,
-        config().bettercap.hostname,
-        config().bettercap.port
+        config_read().bettercap.username,
+        config_read().bettercap.password,
+        config_read().bettercap.hostname,
+        config_read().bettercap.port
       ),
       scheme: Cow::Borrowed(scheme),
       is_ready: Arc::new(AtomicBool::new(false)),

@@ -9,15 +9,16 @@ use pwnagotchi_core::{
   agent::{Agent, AgentComponent},
   automata::{Automata, AutomataComponent},
   bettercap::{Bettercap, BettercapComponent},
-  cli::CliComponent,
+  cli::Cli,
   events::eventlistener::EventListenerComponent,
+  grid::Grid,
   mesh::advertiser::AdvertiserComponent,
   setup::SetupComponent,
 };
 use pwnagotchi_plugins::managers::plugin_manager::PluginManager;
 use pwnagotchi_rs::components::manager::ComponentManager;
 use pwnagotchi_shared::{
-  config::{config, init_config},
+  config::{config_read, init_config},
   identity::{Identity, IdentityComponent},
   logger::LOGGER,
   sessions::manager::SessionManager,
@@ -28,6 +29,7 @@ use pwnagotchi_shared::{
     epoch::Epoch,
     events::EventBus,
     general::{Component, CoreModules},
+    grid::GridTrait,
     ui::ViewTrait,
   },
   types::events::EventPayload,
@@ -93,7 +95,7 @@ async fn main() -> anyhow::Result<()> {
   init_config(&cli.config);
 
   if cli.print_config {
-    println!("Configuration: {:?}", config());
+    println!("Configuration: {:?}", config_read());
     exit(EXIT_SUCCESS);
   }
 
@@ -126,6 +128,7 @@ async fn main() -> anyhow::Result<()> {
     Arc::clone(&core_modules.session_manager),
     Arc::clone(&core_modules.identity),
     Arc::clone(&plugin_manager),
+    Arc::clone(&core_modules.grid),
   );
   tokio::task::spawn(async move {
     let _ = Server::new(router).start_server().await;
@@ -155,10 +158,15 @@ async fn main() -> anyhow::Result<()> {
   let plug_manager = Arc::clone(&plugin_manager);
 
   // Cli Routines have to go last ALWAYS
-  let mut cli = CliComponent::new(cli.manual);
+  let controller = Cli::new(Arc::clone(&core_modules));
 
-  let _ = cli.init(&Arc::clone(&core_modules)).await;
-  let _ = cli.start().await;
+  tokio::task::spawn(async move {
+    if cli.manual {
+      controller.do_manual_mode().await;
+    } else {
+      controller.do_auto_mode().await;
+    }
+  });
 
   tokio::select! {
     _ = tokio::signal::ctrl_c() => {
@@ -191,6 +199,8 @@ fn build_coremodules(events: Arc<dyn EventBus>) -> Arc<CoreModules> {
     Arc::clone(&session_manager),
   )) as Arc<dyn AgentTrait + Send + Sync>;
 
+  let grid = Arc::new(Grid::new()) as Arc<dyn GridTrait + Send + Sync>;
+
   Arc::new(CoreModules {
     session_manager: Arc::clone(&session_manager),
     identity: Arc::clone(&identity),
@@ -199,6 +209,7 @@ fn build_coremodules(events: Arc<dyn EventBus>) -> Arc<CoreModules> {
     view: Arc::clone(&view),
     agent: Arc::clone(&agent),
     automata: Arc::clone(&automata),
+    grid: Arc::clone(&grid),
     events,
   })
 }

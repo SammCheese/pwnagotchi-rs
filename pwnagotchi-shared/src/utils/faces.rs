@@ -1,10 +1,10 @@
 use std::fmt;
 
-use crate::{config::config, types::ui::FaceType};
+use crate::{config::config_read, types::ui::FaceType};
 
 impl fmt::Display for FaceType {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    let faces = &config().faces;
+    let faces = &config_read().faces;
     let s = match self {
       FaceType::LookR => &faces.look_r,
       FaceType::LookL => &faces.look_l,

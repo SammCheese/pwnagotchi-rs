@@ -1,11 +1,10 @@
 use std::{error::Error, sync::Arc};
 
 use pwnagotchi_plugins::traits::{
-  events::{AsyncEventHandler, DynamicEventAPITrait, EventHandler},
-  hooks::DynamicHookAPITrait,
-  plugins::{Plugin, PluginInfo},
+  events::EventHandler,
+  plugins::{Plugin, PluginAPI, PluginInfo},
 };
-use pwnagotchi_shared::{traits::general::CoreModules, types::events::EventPayload};
+use pwnagotchi_shared::types::events::EventPayload;
 
 #[derive(Default)]
 pub struct HelloWorld;
@@ -48,15 +47,14 @@ impl Plugin for HelloWorld {
     }
   }
 
-  fn on_load(
-    &mut self,
-    _hook_api: &mut dyn DynamicHookAPITrait,
-    event_api: &mut dyn DynamicEventAPITrait,
-    _core: Arc<CoreModules>,
-  ) -> Result<(), Box<dyn Error + 'static>> {
-    event_api.register_listener("ready", self.handle_ready_event())?;
-    event_api.register_listener("starting", self.handle_starting_event())?;
-    event_api.register_listener("plugin::init", self.handle_plugin_event())?;
+  fn on_load(&mut self, plugin_api: PluginAPI) -> Result<(), Box<dyn Error + 'static>> {
+    plugin_api.event_api.register_listener("ready", self.handle_ready_event())?;
+    plugin_api
+      .event_api
+      .register_listener("starting", self.handle_starting_event())?;
+    plugin_api
+      .event_api
+      .register_listener("plugin::init", self.handle_plugin_event())?;
     Ok(())
   }
 

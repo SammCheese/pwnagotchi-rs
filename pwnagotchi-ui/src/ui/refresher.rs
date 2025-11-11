@@ -2,7 +2,7 @@ use std::{fmt::Write, sync::Arc};
 
 use anyhow::Result;
 use pwnagotchi_shared::{
-  config::config,
+  config::config_read,
   sessions::manager::SessionManager,
   traits::{
     general::{Component, CoreModules, Dependencies},
@@ -103,7 +103,7 @@ impl Refresher {
   }
 
   fn update_handshakes(&self) {
-    let handshakes_path = config().bettercap.handshakes.to_string();
+    let handshakes_path = config_read().bettercap.handshakes.to_string();
     let total = total_unique_handshakes(&handshakes_path);
     let session = self.sm.get_session();
     let state = &session.read().state;

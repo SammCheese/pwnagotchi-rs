@@ -8,24 +8,24 @@ use axum::{
   http::{Request, StatusCode, header},
   middleware::{self, Next},
   response::{IntoResponse, Response},
-  routing::get,
+  routing::{get, post},
 };
 use axum_auth::AuthBasic;
 use include_dir::{Dir, include_dir};
 use parking_lot::RwLock;
 use pwnagotchi_plugins::managers::plugin_manager::PluginManager;
 use pwnagotchi_shared::{
-  config::config,
+  config::config_read,
   identity::Identity,
   logger::LOGGER,
   sessions::manager::SessionManager,
-  traits::{general::Dependencies, ui::ServerTrait},
+  traits::{general::Dependencies, grid::GridTrait, ui::ServerTrait},
 };
 use tokio::sync::oneshot;
 
 use crate::web::pages::handler::{
   inbox_handler, index_handler, message_handler, new_message_handler, peers_handler,
-  plugins_handler, profile_handler, status_handler, ui,
+  plugins_handler, profile_handler, status_handler, toggle_handler, ui,
 };
 
 pub static TEMPLATE_ASSETS: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/assets/templates");
@@ -48,6 +48,7 @@ pub struct WebUIState {
   pub sm: Arc<SessionManager>,
   pub identity: Arc<RwLock<Identity>>,
   pub pluginmanager: Arc<RwLock<PluginManager>>,
+  pub grid: Arc<dyn GridTrait + Send + Sync>,
 }
 
 pub struct Server {
@@ -70,7 +71,7 @@ impl ServerTrait for Server {
 impl Server {
   #[must_use]
   pub fn new(router: Router) -> Self {
-    let cfg = &config().ui.web;
+    let cfg = &config_read().ui.web;
     Self {
       router,
       address: cfg.address.clone(),
@@ -105,7 +106,7 @@ impl Server {
 }
 
 async fn basic_auth_middleware(req: Request<Body>, next: Next) -> impl IntoResponse {
-  let cfg = &config().ui.web;
+  let cfg = &config_read().ui.web.clone();
   let (username, password) = (cfg.username.to_string(), cfg.password.to_string());
 
   if username.is_empty() || password.is_empty() {
@@ -144,8 +145,9 @@ pub fn build_router(
   sm: Arc<SessionManager>,
   identity: Arc<RwLock<Identity>>,
   pluginmanager: Arc<RwLock<PluginManager>>,
+  grid: Arc<dyn GridTrait + Send + Sync>,
 ) -> Router {
-  let state = Arc::new(WebUIState { sm, identity, pluginmanager });
+  let state = Arc::new(WebUIState { sm, identity, pluginmanager, grid });
 
   Router::new()
     .layer(middleware::from_fn(basic_auth_middleware))
@@ -167,6 +169,8 @@ pub fn build_router(
     .route("/inbox/send", get(new_message_handler))
     // Plugins
     .route("/plugins", get(plugins_handler))
+    .route("/plugins/toggle", post(toggle_handler))
+    //.route("/plugins/{plugin}", get(plugin_template_handler))
     .route("/status", get(status_handler))
     .route("/message", get(message_handler))
     // Static

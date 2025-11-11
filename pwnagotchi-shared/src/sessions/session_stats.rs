@@ -1,4 +1,7 @@
-use std::{collections::HashMap, time::SystemTime};
+use std::{
+  collections::HashMap,
+  time::{Duration, SystemTime},
+};
 
 use crate::{mesh::peer::Peer, utils::general::format_duration_human};
 
@@ -35,8 +38,6 @@ pub struct SessionStats {
   pub id: String,
   pub start: Option<SystemTime>,
   pub stop: Option<SystemTime>,
-  pub duration_secs: Option<u64>,
-  pub human_duration: Option<String>,
 
   pub deauthed: usize,
   pub associated: usize,
@@ -47,15 +48,19 @@ pub struct SessionStats {
 }
 
 impl SessionStats {
-  pub fn finalize(&mut self) {
+  pub fn duration_secs(&self) -> Option<u64> {
     if let (Some(start), Some(stop)) = (self.start, self.stop)
       && let Ok(duration) = stop.duration_since(start)
     {
-      self.duration_secs = Some(duration.as_secs());
-      self.human_duration = Some(format_duration_human(duration));
+      return Some(duration.as_secs());
     }
-    if self.epochs.epochs > 0 {
-      self.epochs.avg_reward /= self.epochs.epochs as f64;
+    None
+  }
+
+  pub fn duration_human(&self) -> Option<String> {
+    if let Some(secs) = self.duration_secs() {
+      return Some(format_duration_human(Duration::from_secs(secs)));
     }
+    None
   }
 }

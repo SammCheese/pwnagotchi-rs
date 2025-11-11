@@ -7,7 +7,6 @@ use syn::{
 
 // AI NOTICE: This macro has partly been made with the Assistance of AI
 // It has been heavily tested, manually reviewed and adjusted by me
-// I will rewrite this by hand later
 
 fn lit_str(s: &str) -> proc_macro2::Literal {
   proc_macro2::Literal::string(s)

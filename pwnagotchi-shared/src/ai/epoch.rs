@@ -14,7 +14,7 @@ use tokio::sync::mpsc::channel;
 
 use crate::{
   ai::reward::calculate_reward,
-  config::config,
+  config::config_read,
   logger::LOGGER,
   mesh::peer::Peer,
   models::net::AccessPoint,
@@ -96,7 +96,7 @@ impl Epoch {
       self.blind_for = 0;
     }
 
-    let bond_unit_scale = config().personality.bond_encounters_factor;
+    let bond_unit_scale = config_read().personality.bond_encounters_factor;
 
     self.num_peers = peers.len().try_into().unwrap_or(0);
     self.total_bond_factor = aps
@@ -158,10 +158,10 @@ impl Epoch {
       self.bored_for = 0;
     }
 
-    if self.inactive_for >= config().personality.sad_num_epochs {
+    if self.inactive_for >= config_read().personality.sad_num_epochs {
       self.bored_for = 0;
       self.sad_for += 1;
-    } else if self.inactive_for >= config().personality.bored_num_epochs {
+    } else if self.inactive_for >= config_read().personality.bored_num_epochs {
       self.sad_for = 0;
       self.bored_for += 1;
     } else {

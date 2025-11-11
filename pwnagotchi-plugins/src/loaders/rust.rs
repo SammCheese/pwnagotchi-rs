@@ -2,10 +2,11 @@ use std::{
   error::Error,
   panic::{AssertUnwindSafe, catch_unwind},
   sync::Arc,
+  thread,
 };
 
 use libloading::{Library, Symbol};
-use pwnagotchi_shared::{config::config, logger::LOGGER, traits::general::CoreModules};
+use pwnagotchi_shared::{config::config_read, logger::LOGGER, traits::general::CoreModules};
 use uuid::Uuid;
 
 use crate::{
@@ -14,7 +15,10 @@ use crate::{
     hook_manager::{DynamicHookAPI, HookManager},
     plugin_manager::{PluginEntry, PluginState},
   },
-  traits::{events::DynamicEventAPITrait, loaders::PluginLoader, plugins::Plugin},
+  traits::{
+    loaders::PluginLoader,
+    plugins::{Plugin, PluginAPI},
+  },
 };
 
 pub struct RustPluginLoader {
@@ -53,7 +57,7 @@ impl PluginLoader for RustPluginLoader {
   }
 
   fn load_plugins(&mut self) -> Result<(), Box<dyn Error>> {
-    let plugin_dir = config().main.plugins_path.clone();
+    let plugin_dir = config_read().main.plugins_path.clone();
 
     if let Some(plugin_dir) = plugin_dir {
       let plugin_dir = plugin_dir.to_string();
@@ -77,28 +81,41 @@ impl PluginLoader for RustPluginLoader {
 
   fn unload_all(&mut self) -> Result<(), Box<dyn Error>> {
     for entry in &mut self.plugins {
-      let plugin = &mut entry.plugin;
-      match catch_unwind(AssertUnwindSafe(|| plugin.on_unload())) {
-        Ok(Ok(())) => {
+      let plugin_name = entry.plugin.info().name.to_string();
+      let plugin = &mut *entry.plugin;
+
+      let result = thread::scope(|s| {
+        s.spawn(|| {
+          catch_unwind(AssertUnwindSafe(|| plugin.on_unload()))
+            .map(|res| res.map_err(|e| e.to_string()))
+        })
+        .join()
+      });
+
+      match result {
+        Ok(Ok(Ok(()))) => {
           entry.state = PluginState::Unloaded;
           entry.error = None;
-          self.hook_manager.unregister_plugin(plugin.info().name).ok();
-          self.event_manager.unregister_plugin(plugin.info().name).ok();
-          LOGGER
-            .log_info("PLUGIN", &format!("Successfully unloaded plugin '{}'", plugin.info().name));
-          println!("Successfully unloaded plugin '{}'", plugin.info().name);
+          self.hook_manager.unregister_plugin(&plugin_name).ok();
+          self.event_manager.unregister_plugin(&plugin_name).ok();
+          LOGGER.log_info("PLUGIN", &format!("Successfully unloaded plugin '{}'", plugin_name));
+          println!("Successfully unloaded plugin '{}'", plugin_name);
         }
-        Ok(Err(e)) => {
+        Ok(Ok(Err(e))) => {
           entry.state = PluginState::Failed;
-          entry.error = Some(e.to_string());
-          self.hook_manager.unregister_plugin(plugin.info().name).ok();
-          self.event_manager.unregister_plugin(plugin.info().name).ok();
-          println!("Failed to unload plugin '{}': {}", plugin.info().name, e);
+          entry.error = Some(e.clone());
+          self.hook_manager.unregister_plugin(&plugin_name).ok();
+          self.event_manager.unregister_plugin(&plugin_name).ok();
+          println!("Failed to unload plugin '{}': {}", plugin_name, e);
         }
-        Err(_) => {
+        Ok(Err(_)) => {
           entry.state = PluginState::Failed;
-          self.event_manager.unregister_plugin(plugin.info().name).ok();
-          println!("Plugin '{}' panicked during unloading", plugin.info().name);
+          self.event_manager.unregister_plugin(&plugin_name).ok();
+          println!("Plugin '{}' panicked during unloading", plugin_name);
+        }
+        Err(e) => {
+          entry.state = PluginState::Failed;
+          println!("Thread panicked for plugin '{}': {:?}", plugin_name, e);
         }
       }
     }
@@ -110,7 +127,7 @@ impl PluginLoader for RustPluginLoader {
   fn init_all(&mut self, core: Arc<CoreModules>) -> Result<(), Box<dyn Error>> {
     // lets save this for later
     self.core = Some(Arc::clone(&core));
-    let disabled_plugins: Vec<String> = config()
+    let disabled_plugins: Vec<String> = config_read()
       .plugins
       .iter()
       .filter(|s| !s.1.enabled)
@@ -118,36 +135,60 @@ impl PluginLoader for RustPluginLoader {
       .collect();
 
     for entry in &mut self.plugins {
-      if disabled_plugins.contains(&entry.plugin.info().name.to_string()) {
-        println!("Skipping disabled plugin '{}'", entry.plugin.info().name);
+      let plugin_name = entry.plugin.info().name.to_string();
+
+      if disabled_plugins.contains(&plugin_name) {
+        println!("Skipping disabled plugin '{}'", plugin_name);
         continue;
       }
 
-      let plugin = &mut entry.plugin;
-      let core = Arc::clone(&core);
-      let mut hook_api = self.hook_manager.scope(plugin.info().name);
-      let mut event_api = self.event_manager.scope(plugin.info().name);
+      let logger = Arc::new(&LOGGER);
 
-      // Safely catch panics from plugins
-      match catch_unwind(AssertUnwindSafe(|| plugin.on_load(&mut hook_api, &mut event_api, core))) {
-        Ok(Ok(())) => {
-          LOGGER.log_info(
-            "PLUGIN",
-            &format!("Successfully initialized plugin '{}'", plugin.info().name),
-          );
-          println!("Successfully initialized plugin '{}'", plugin.info().name);
+      let plugin_api = PluginAPI {
+        hook_api: &mut DynamicHookAPI {
+          manager: &Arc::clone(&self.hook_manager),
+          plugin_name: plugin_name.clone(),
+          registered_hooks: Vec::new(),
+        },
+        event_api: &mut DynamicEventAPI {
+          manager: &self.event_manager,
+          plugin_name: plugin_name.clone(),
+          registered_listeners: Vec::new(),
+        },
+        core_modules: Arc::clone(&core),
+        logger,
+        config: &config_read(),
+      };
+
+      let plugin = &mut *entry.plugin;
+
+      let result = thread::scope(|s| {
+        s.spawn(|| {
+          catch_unwind(AssertUnwindSafe(|| plugin.on_load(plugin_api)))
+            .map(|res| res.map_err(|e| e.to_string()))
+        })
+        .join()
+      });
+
+      match result {
+        Ok(Ok(Ok(()))) => {
+          LOGGER.log_info("PLUGIN", &format!("Successfully initialized plugin '{}'", plugin_name));
+          println!("Successfully initialized plugin '{}'", plugin_name);
           entry.state = PluginState::Initialized;
           entry.error = None;
         }
-        Ok(Err(e)) => {
+        Ok(Ok(Err(e))) => {
           entry.state = PluginState::Failed;
-          entry.error = Some(e.to_string());
-          let _ = event_api.cleanup();
-          println!("Failed to initialize plugin '{}': {}", plugin.info().name, e);
+          entry.error = Some(e.clone());
+          println!("Failed to initialize plugin '{}': {}", plugin_name, e);
         }
-        Err(_) => {
-          let _ = event_api.cleanup();
-          println!("Plugin '{}' panicked during initialization", plugin.info().name);
+        Ok(Err(_)) => {
+          entry.state = PluginState::Failed;
+          println!("Plugin '{}' panicked during initialization", plugin_name);
+        }
+        Err(e) => {
+          entry.state = PluginState::Failed;
+          println!("Thread panicked for plugin '{}': {:?}", plugin_name, e);
         }
       }
     }
@@ -159,76 +200,109 @@ impl PluginLoader for RustPluginLoader {
   }
 
   fn enable_plugin(&mut self, name: &str) -> Result<(), Box<dyn Error>> {
-    for entry in &mut self.plugins {
-      let plugin = &mut entry.plugin;
-      if plugin.info().name != name {
-        continue;
-      }
+    let entry = self.plugins.iter_mut().find(|e| e.plugin.info().name == name);
 
-      let hook_api = &mut DynamicHookAPI {
+    if entry.is_none() {
+      return Err(format!("Plugin '{}' not found", name).into());
+    }
+
+    let entry = entry.unwrap();
+    let plugin = &mut *entry.plugin;
+
+    let logger = Arc::new(&LOGGER);
+    let plugin_name = plugin.info().name.to_string();
+
+    let plugin_api = PluginAPI {
+      hook_api: &mut DynamicHookAPI {
         manager: &Arc::clone(&self.hook_manager),
-        plugin_name: plugin.info().name.to_string(),
+        plugin_name: plugin_name.clone(),
         registered_hooks: Vec::new(),
-      };
-
-      let event_api = &mut DynamicEventAPI {
+      },
+      event_api: &mut DynamicEventAPI {
         manager: &self.event_manager,
-        plugin_name: plugin.info().name.to_string(),
+        plugin_name: plugin_name.clone(),
         registered_listeners: Vec::new(),
-      };
+      },
+      core_modules: self.core.as_ref().ok_or("CoreModules not initialized")?.clone(),
+      logger,
+      config: &config_read(),
+    };
 
-      match catch_unwind(AssertUnwindSafe(|| {
-        let core = self.core.as_ref().ok_or("CoreModules not initialized")?;
-        plugin.on_load(hook_api, event_api, Arc::clone(core))
-      })) {
-        Ok(Ok(())) => {
-          entry.state = PluginState::Initialized;
-          entry.error = None;
-          return Ok(());
-        }
-        Ok(Err(e)) => {
-          entry.state = PluginState::Failed;
-          let _ = event_api.cleanup();
-          entry.error = Some(e.to_string());
-          return Err(format!("Failed to enable plugin '{}': {}", name, e).into());
-        }
-        Err(_) => {
-          entry.state = PluginState::Failed;
-          let _ = event_api.cleanup();
-          return Err(format!("Plugin '{}' panicked during enabling", name).into());
-        }
+    let plugin = &mut *entry.plugin;
+
+    let result = thread::scope(|s| {
+      s.spawn(|| {
+        catch_unwind(AssertUnwindSafe(|| plugin.on_load(plugin_api)))
+          .map(|res| res.map_err(|e| e.to_string()))
+      })
+      .join()
+    });
+
+    match result {
+      Ok(Ok(Ok(()))) => {
+        LOGGER.log_info("PLUGIN", &format!("Successfully initialized plugin '{}'", plugin_name));
+        println!("Successfully initialized plugin '{}'", plugin_name);
+        entry.state = PluginState::Initialized;
+        entry.error = None;
+        Ok(())
+      }
+      Ok(Ok(Err(e))) => {
+        entry.state = PluginState::Failed;
+        entry.error = Some(e.clone());
+        Err(format!("Failed to enable plugin '{}': {}", name, e).into())
+      }
+      Ok(Err(_)) => {
+        entry.state = PluginState::Failed;
+        Err(format!("Plugin '{}' panicked during enabling", name).into())
+      }
+      Err(e) => {
+        entry.state = PluginState::Failed;
+        Err(format!("Thread panicked for plugin '{}': {:?}", name, e).into())
       }
     }
-    Err(format!("Plugin '{}' not found", name).into())
   }
 
   fn disable_plugin(&mut self, name: &str) -> Result<(), Box<dyn Error>> {
-    for entry in &mut self.plugins {
-      let plugin = &mut entry.plugin;
-      if plugin.info().name != name {
-        continue;
-      }
-      match catch_unwind(AssertUnwindSafe(|| plugin.on_unload())) {
-        Ok(Ok(())) => {
-          self.hook_manager.unregister_plugin(plugin.info().name).ok();
-          self.event_manager.unregister_plugin(plugin.info().name).ok();
+    let entry = self.plugins.iter_mut().find(|e| e.plugin.info().name == name);
 
-          entry.state = PluginState::Unloaded;
-          return Ok(());
-        }
-        Ok(Err(e)) => {
-          entry.state = PluginState::Failed;
-          self.event_manager.unregister_plugin(plugin.info().name).ok();
-          return Err(format!("Failed to disable plugin '{}': {}", name, e).into());
-        }
-        Err(_) => {
-          entry.state = PluginState::Failed;
-          self.event_manager.unregister_plugin(plugin.info().name).ok();
-          return Err(format!("Plugin '{}' panicked during disabling", name).into());
-        }
+    if entry.is_none() {
+      return Err(format!("Plugin '{}' not found", name).into());
+    }
+
+    let entry = entry.unwrap();
+    let plugin = &mut *entry.plugin;
+
+    let result = thread::scope(|s| {
+      s.spawn(|| {
+        catch_unwind(AssertUnwindSafe(|| plugin.on_unload()))
+          .map(|res| res.map_err(|e| e.to_string()))
+      })
+      .join()
+    });
+
+    match result {
+      Ok(Ok(Ok(()))) => {
+        self.hook_manager.unregister_plugin(name).ok();
+        self.event_manager.unregister_plugin(name).ok();
+        entry.state = PluginState::Unloaded;
+        LOGGER.log_info("PLUGIN", &format!("Successfully disabled plugin '{}'", name));
+        Ok(())
+      }
+      Ok(Ok(Err(e))) => {
+        entry.state = PluginState::Failed;
+        self.event_manager.unregister_plugin(name).ok();
+        Err(format!("Failed to disable plugin '{}': {}", name, e).into())
+      }
+      Ok(Err(_)) => {
+        entry.state = PluginState::Failed;
+        self.event_manager.unregister_plugin(name).ok();
+        Err(format!("Plugin '{}' panicked during disabling", name).into())
+      }
+      Err(e) => {
+        entry.state = PluginState::Failed;
+        Err(format!("Thread panicked for plugin '{}': {:?}", name, e).into())
       }
     }
-    Err(format!("Plugin '{}' not found", name).into())
   }
 }
 

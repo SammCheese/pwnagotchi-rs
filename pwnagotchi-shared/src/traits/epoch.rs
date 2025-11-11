@@ -7,7 +7,7 @@ pub struct Epoch {
   pub obs_rx: Receiver<Observation>,
   pub data_tx: Sender<EpochData>,
   pub data_rx: Receiver<EpochData>,
-  pub epoch: u64,
+  pub epoch: u32,
 
   pub inactive_for: u32,
   pub active_for: u32,

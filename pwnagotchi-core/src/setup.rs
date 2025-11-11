@@ -2,7 +2,7 @@ use std::{sync::Arc, time::Duration};
 
 use anyhow::Result;
 use pwnagotchi_shared::{
-  config::config,
+  config::config_read,
   logger::LOGGER,
   traits::{
     bettercap::{BettercapCommand, BettercapTrait, SetupTrait},
@@ -101,7 +101,9 @@ pub async fn perform_bettercap_setup(bc: &Arc<dyn BettercapTrait + Send + Sync>)
 async fn setup_events(bc: &Arc<dyn BettercapTrait + Send + Sync>) {
   LOGGER.log_debug("Agent", "Setting up Bettercap events...");
 
-  for event in &config().bettercap.silence {
+  let silence_events = config_read().bettercap.silence.clone();
+
+  for event in silence_events {
     let (tx, rx) = tokio::sync::oneshot::channel();
     let _ = bc.send(BettercapCommand::run(format!("events.ignore {event}"), Some(tx))).await;
 
@@ -112,10 +114,15 @@ async fn setup_events(bc: &Arc<dyn BettercapTrait + Send + Sync>) {
 }
 
 async fn reset_wifi_settings(bc: &Arc<dyn BettercapTrait + Send + Sync>) {
-  let interface = &config().main.iface;
-  let ap_ttl = format!("{}", config().personality.ap_ttl);
-  let sta_ttl = format!("{}", config().personality.sta_ttl);
-  let min_rssi = format!("{}", config().personality.min_rssi);
+  let (interface, ap_ttl, sta_ttl, min_rssi) = {
+    let cfg = config_read();
+    (
+      cfg.main.iface.clone(),
+      cfg.personality.ap_ttl,
+      cfg.personality.sta_ttl,
+      cfg.personality.min_rssi,
+    )
+  };
   let (ap_tx, ap_rx) = tokio::sync::oneshot::channel();
   let (sta_tx, sta_rx) = tokio::sync::oneshot::channel();
   let (tx, rx) = tokio::sync::oneshot::channel();
@@ -151,7 +158,7 @@ async fn reset_wifi_settings(bc: &Arc<dyn BettercapTrait + Send + Sync>) {
   }
 
   let (tx, rx) = tokio::sync::oneshot::channel();
-  let path = &config().bettercap.handshakes;
+  let path = &config_read().bettercap.handshakes.clone();
   let _ = bc
     .send(BettercapCommand::run(format!("set wifi.handshakes.file {path}"), Some(tx)))
     .await;
@@ -169,9 +176,10 @@ async fn reset_wifi_settings(bc: &Arc<dyn BettercapTrait + Send + Sync>) {
 }
 
 async fn start_monitor_mode(bc: &Arc<dyn BettercapTrait + Send + Sync>) {
-  let interface = &config().main.iface;
-  let mon_start_cmd = &config().main.mon_start_cmd;
-  let no_restart = &config().main.no_restart;
+  let (interface, mon_start_cmd, no_restart) = {
+    let cfg = config_read();
+    (cfg.main.iface.clone(), cfg.main.mon_start_cmd.clone(), cfg.main.no_restart)
+  };
   let mut is_starting = false;
   let mut has_iface = false;
 

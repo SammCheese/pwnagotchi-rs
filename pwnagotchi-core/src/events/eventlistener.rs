@@ -3,7 +3,7 @@ use std::{fmt::Write, sync::Arc};
 use anyhow::Result;
 use parking_lot::RwLock;
 use pwnagotchi_shared::{
-  config::config,
+  config::config_read,
   logger::LOGGER,
   models::net::Handshake,
   sessions::manager::SessionManager,
@@ -160,7 +160,7 @@ pub async fn start_event_loop(
       let json = serde_json::from_str::<Value>(&msg).unwrap_or(Value::Null);
       handle_handshake_event(&json, sm, &view, &epoch).await;
 
-      if let Err(err) = emit_serialized(events.as_ref(), "handshake", &json).await {
+      if let Err(err) = emit_serialized(events.as_ref(), "on_handshake", &json).await {
         LOGGER.log_error("EVENTS", &format!("Failed to emit 'handshake' event: {err}"));
       }
     }
@@ -234,7 +234,7 @@ pub async fn handle_handshake_event(
   let mut session_mut = session.write();
   session_mut.state.last_pwned = Some(last_pwned_hostname.clone());
 
-  let total = total_unique_handshakes(&config().bettercap.handshakes);
+  let total = total_unique_handshakes(&config_read().bettercap.handshakes);
   let handshake_count = session_mut.state.handshakes.len();
   let mut text = format!("{handshake_count} ({total:02})");
 

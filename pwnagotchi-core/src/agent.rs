@@ -9,7 +9,7 @@ use anyhow::Result;
 use parking_lot::RwLock;
 use pwnagotchi_macros::hookable;
 use pwnagotchi_shared::{
-  config::config,
+  config::config_read,
   logger::LOGGER,
   models::{
     agent::RunningMode,
@@ -22,11 +22,10 @@ use pwnagotchi_shared::{
     automata::AutomataTrait,
     bettercap::{BettercapCommand, BettercapTrait},
     epoch::Epoch,
-    events::EventBus,
     general::{Component, CoreModule, CoreModules, Dependencies},
     ui::ViewTrait,
   },
-  types::{epoch::Activity, events::EventPayload},
+  types::epoch::Activity,
 };
 use serde::{Deserialize, Serialize};
 use tokio::task::JoinHandle;
@@ -67,7 +66,7 @@ impl Dependencies for AgentComponent {
 #[async_trait::async_trait]
 impl Component for AgentComponent {
   async fn init(&mut self, _ctx: &CoreModules) -> Result<()> {
-    let handshakes_path = &config().bettercap.handshakes.as_ref();
+    let handshakes_path = &config_read().bettercap.handshakes.to_string();
     if fs::metadata(handshakes_path).is_err()
       && let Err(e) = fs::create_dir_all(handshakes_path)
     {
@@ -183,7 +182,7 @@ impl Agent {
 
   pub async fn get_access_points(&self) -> Vec<AccessPoint> {
     let ignored: HashSet<String> =
-      config().main.whitelist.iter().map(|s| s.to_lowercase()).collect();
+      config_read().main.whitelist.iter().map(|s| s.to_lowercase()).collect();
     let mut aps: Vec<AccessPoint> = Vec::new();
 
     if let Ok(Some(session)) = self.bettercap.session().await {
@@ -227,7 +226,7 @@ impl Agent {
       *e += 1;
     });
 
-    session.read().state.history[&bssid.to_string()] < config().personality.max_interactions
+    session.read().state.history[&bssid.to_string()] < config_read().personality.max_interactions
   }
 
   async fn set_mode(&self, mode: RunningMode) {
@@ -263,10 +262,15 @@ impl Agent {
   }
 
   async fn recon(&self) {
-    let mut recon_time = config().personality.recon_time;
-    let max_inactive = config().personality.max_inactive_scale;
-    let recon_multiplier = config().personality.recon_inactive_multiplier;
-    let channels = &config().personality.channels;
+    let (mut recon_time, max_inactive, recon_multiplier, channels) = {
+      let config = config_read();
+      (
+        config.personality.recon_time,
+        config.personality.max_inactive_scale,
+        config.personality.recon_inactive_multiplier,
+        config.personality.channels.clone(),
+      )
+    };
 
     LOGGER.log_debug("RECON", "Starting Recon");
 
@@ -321,11 +325,11 @@ impl Agent {
       return;
     }
 
-    if throttle.is_none() && config().personality.throttle_a.is_finite() {
-      throttle = Some(config().personality.throttle_a);
+    if throttle.is_none() && config_read().personality.throttle_a.is_finite() {
+      throttle = Some(config_read().personality.throttle_a);
     }
 
-    if config().personality.associate && self.should_interact(&ap.mac) {
+    if config_read().personality.associate && self.should_interact(&ap.mac) {
       self.view.on_assoc(ap);
 
       LOGGER.log_info(
@@ -386,11 +390,11 @@ impl Agent {
       return;
     }
 
-    if throttle.is_none() && config().personality.throttle_d.is_finite() {
-      throttle = Some(config().personality.throttle_d);
+    if throttle.is_none() && config_read().personality.throttle_d.is_finite() {
+      throttle = Some(config_read().personality.throttle_d);
     }
 
-    if config().personality.deauth && self.should_interact(&sta.mac) {
+    if config_read().personality.deauth && self.should_interact(&sta.mac) {
       self.view.on_deauth(sta);
 
       LOGGER.log_info(
@@ -452,13 +456,16 @@ impl Agent {
 
     LOGGER.log_debug("Agent", &format!("Attempting switch to Channel {channel}"));
 
+    let recon_time = config_read().personality.hop_recon_time;
+    let min_recon_time = config_read().personality.min_recon_time;
+
     let mut wait = 0;
     let did_deauth = self.epoch.read().did_deauth;
     let did_associate = self.epoch.read().did_associate;
     if did_deauth {
-      wait = config().personality.hop_recon_time;
+      wait = recon_time;
     } else if did_associate {
-      wait = config().personality.min_recon_time;
+      wait = min_recon_time;
     }
 
     let session = self.sm.get_session();
@@ -498,7 +505,7 @@ impl Agent {
   async fn get_access_points_by_channel(&self) -> Vec<(u8, Vec<AccessPoint>)> {
     let aps = self.get_access_points().await;
 
-    let channels: HashSet<u8> = config().personality.channels.iter().copied().collect();
+    let channels: HashSet<u8> = config_read().personality.channels.iter().copied().collect();
     let mut grouped: HashMap<u8, Vec<AccessPoint>> = HashMap::new();
 
     LOGGER.log_debug("Agent", &format!("{} APS", aps.len()));

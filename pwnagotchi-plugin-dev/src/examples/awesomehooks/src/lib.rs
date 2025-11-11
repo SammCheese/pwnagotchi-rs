@@ -1,16 +1,11 @@
-use std::{error::Error, sync::Arc};
+use std::error::Error;
 
 use pwnagotchi_plugins::{
   async_after_hook, async_before_hook, async_instead_hook,
-  traits::{
-    events::DynamicEventAPITrait,
-    hooks::DynamicHookAPITrait,
-    plugins::{Plugin, PluginInfo},
-  },
+  traits::plugins::{Plugin, PluginAPI, PluginInfo},
 };
 use pwnagotchi_shared::{
   models::{agent::RunningMode, net::AccessPoint},
-  traits::general::CoreModules,
   types::hooks::{AfterHookResult, BeforeHookResult, HookArgs, HookReturn, InsteadHookResult},
 };
 
@@ -34,12 +29,7 @@ impl Plugin for AwesomeHooking {
     }
   }
 
-  fn on_load(
-    &mut self,
-    hook_api: &mut dyn DynamicHookAPITrait,
-    _event_api: &mut dyn DynamicEventAPITrait,
-    _core: Arc<CoreModules>,
-  ) -> Result<(), Box<dyn Error + 'static>> {
+  fn on_load(&mut self, plugin_api: PluginAPI) -> Result<(), Box<dyn Error + 'static>> {
     // Async Before Hook
     let before = async_before_hook!(|args: &mut HookArgs| {
       let owned_args = args.unmut();
@@ -48,7 +38,7 @@ impl Plugin for AwesomeHooking {
         Ok(BeforeHookResult::Continue(owned_args))
       }
     });
-    hook_api.register_before_async("Agent::recon", before)?;
+    plugin_api.hook_api.register_before_async("Agent::recon", before)?;
 
     // Async After Hook
     let after = async_after_hook!(|_args: &mut HookArgs, ret: &mut HookReturn| {
@@ -70,7 +60,9 @@ impl Plugin for AwesomeHooking {
         Ok(AfterHookResult::Continue(HookReturn::new(aps)))
       }
     });
-    hook_api.register_after_async("Agent::get_access_points_by_channel", after)?;
+    plugin_api
+      .hook_api
+      .register_after_async("Agent::get_access_points_by_channel", after)?;
 
     // Async Instead Hook
     // Important note: The self parameter is NOT passed to instead hooks
@@ -85,7 +77,7 @@ impl Plugin for AwesomeHooking {
         Ok(InsteadHookResult::Delegate(args))
       }
     });
-    hook_api.register_instead_async("Agent::set_mode", instead)?;
+    plugin_api.hook_api.register_instead_async("Agent::set_mode", instead)?;
 
     Ok(())
   }
